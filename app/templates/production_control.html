@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Контроль производства — Türkmenabat ERP</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="topbar">
+<strong>Türkmenabat ERP</strong>
+<nav>
+<a href="/dashboard">Главная</a>
+<a href="/warehouse/raw-materials">Склад</a>
+<a href="/purchases">Закупки</a>
+<a href="/recipes">Рецептуры</a>
+<a href="/production">Производство</a>
+<a href="/production/control">Контроль производства</a>
+<a href="/finished-goods">Готовая продукция</a>
+<a href="/logout">Выйти</a>
+</nav>
+</header>
+
+<main class="container">
+<div class="page-head">
+<p class="eyebrow">ПРОИЗВОДСТВЕННЫЙ УЧЁТ</p>
+<h1>Брак, потери, списания и контроль качества</h1>
+<p>Все проведённые операции изменяют складские остатки и сохраняются в аудите.</p>
+</div>
+
+{% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+{% if success %}<div class="alert success">{{ success }}</div>{% endif %}
+
+<section class="metric-grid">
+<article class="metric-card"><p>Всего выпущено</p><h2>{{ stats.produced }} <small>ед.</small></h2></article>
+<article class="metric-card"><p>Брак</p><h2>{{ stats.defect }} <small>ед.</small></h2></article>
+<article class="metric-card"><p>Списано</p><h2>{{ stats.writeoff }} <small>ед.</small></h2></article>
+<article class="metric-card"><p>В переработку</p><h2>{{ stats.rework }} <small>ед.</small></h2></article>
+<article class="metric-card"><p>Эффективность</p><h2>{{ stats.efficiency }} <small>%</small></h2></article>
+</section>
+
+<section class="panel">
+<h2>Новая операция</h2>
+<form action="/production/events/create" method="post" class="form-grid" id="event-form">
+<label>Номер документа
+<input name="document_number" placeholder="DEF-0001 / LOS-0001" required>
+</label>
+
+<label>Тип операции
+<select name="event_type" id="event-type" required>
+<option value="defect">Брак производства</option>
+<option value="finished_writeoff">Списание готовой продукции</option>
+<option value="raw_loss">Потеря сырья</option>
+<option value="rework">Передача в переработку</option>
+</select>
+</label>
+
+<label id="product-field">Готовый продукт
+<select name="product_id">
+<option value="">— Выберите продукт —</option>
+{% for p in products %}
+<option value="{{ p.id }}">{{ p.code }} — {{ p.name }}</option>
+{% endfor %}
+</select>
+</label>
+
+<label id="material-field" style="display:none">Сырьё
+<select name="material_id">
+<option value="">— Выберите сырьё —</option>
+{% for m in materials %}
+<option value="{{ m.id }}">{{ m.code }} — {{ m.name }} ({{ m.unit }})</option>
+{% endfor %}
+</select>
+</label>
+
+<label>Производственная партия
+<select name="production_batch_id">
+<option value="">— Не привязывать —</option>
+{% for b in batches %}
+<option value="{{ b.id }}">{{ b.batch_number }} — {{ b.product.name }}</option>
+{% endfor %}
+</select>
+</label>
+
+<label>Количество
+<input name="quantity" type="number" min="0.0001" step="0.0001" required>
+</label>
+
+<label>Причина
+<input name="reason" list="reason-list" placeholder="Выберите или напишите причину" required>
+<datalist id="reason-list">
+{% for reason in finished_reasons %}<option value="{{ reason }}">{% endfor %}
+{% for reason in raw_loss_reasons %}<option value="{{ reason }}">{% endfor %}
+</datalist>
+</label>
+
+<label>Ответственный
+<input name="responsible_person" placeholder="Ф.И.О.">
+</label>
+
+<label class="wide">Комментарий
+<input name="note" placeholder="Смена, линия, место происшествия и другие детали">
+</label>
+
+<button class="wide">Провести операцию</button>
+</form>
+</section>
+
+<section class="panel">
+<h2>Контроль качества партии</h2>
+<form action="/production/quality/create" method="post" class="form-grid">
+<label>Номер документа
+<input name="document_number" placeholder="QC-0001" required>
+</label>
+
+<label>Производственная партия
+<select name="production_batch_id" required>
+{% for b in batches %}
+<option value="{{ b.id }}">{{ b.batch_number }} — {{ b.product.name }}</option>
+{% endfor %}
+</select>
+</label>
+
+<label>Крепость, %
+<input name="strength_percent" type="number" min="0" step="0.001">
+</label>
+
+<label>CO₂
+<input name="co2_value" type="number" min="0" step="0.001">
+</label>
+
+<label>Цвет
+<select name="color_result">
+<option value="OK">OK</option>
+<option value="Не соответствует">Не соответствует</option>
+</select>
+</label>
+
+<label>Запах
+<select name="smell_result">
+<option value="OK">OK</option>
+<option value="Не соответствует">Не соответствует</option>
+</select>
+</label>
+
+<label>Вкус
+<select name="taste_result">
+<option value="OK">OK</option>
+<option value="Не соответствует">Не соответствует</option>
+</select>
+</label>
+
+<label>Статус
+<select name="status" required>
+<option value="approved">Одобрено</option>
+<option value="conditional">Условно одобрено</option>
+<option value="rejected">Отклонено</option>
+</select>
+</label>
+
+<label>Проверил
+<input name="checked_by" placeholder="Лаборант / технолог" required>
+</label>
+
+<label class="wide">Комментарий
+<input name="note">
+</label>
+
+<button class="wide" {% if not batches %}disabled{% endif %}>Сохранить контроль качества</button>
+</form>
+</section>
+
+<section class="panel">
+<h2>История брака, потерь и списаний</h2>
+<div class="table-wrap">
+<table>
+<thead>
+<tr>
+<th>Дата</th><th>Документ</th><th>Операция</th><th>Объект</th>
+<th>Количество</th><th>Причина</th><th>Ответственный</th>
+</tr>
+</thead>
+<tbody>
+{% for e in events %}
+<tr>
+<td>{{ e.created_at.strftime('%d.%m.%Y %H:%M') }}</td>
+<td><strong>{{ e.document_number }}</strong></td>
+<td>{{ event_labels.get(e.event_type, e.event_type) }}</td>
+<td>
+{% if e.product %}{{ e.product.name }}
+{% elif e.material %}{{ e.material.name }}
+{% else %}—{% endif %}
+</td>
+<td>
+{{ e.quantity }}
+{% if e.product %}{{ e.product.output_unit }}
+{% elif e.material %}{{ e.material.unit }}{% endif %}
+</td>
+<td>{{ e.reason }}</td>
+<td>{{ e.responsible_person or e.created_by }}</td>
+</tr>
+{% else %}
+<tr><td colspan="7">Операций пока нет.</td></tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+</section>
+
+<section class="panel">
+<h2>Журнал контроля качества</h2>
+<div class="table-wrap">
+<table>
+<thead>
+<tr>
+<th>Дата</th><th>Документ</th><th>Партия</th><th>Продукт</th>
+<th>Крепость</th><th>CO₂</th><th>Органолептика</th><th>Статус</th><th>Проверил</th>
+</tr>
+</thead>
+<tbody>
+{% for q in quality_records %}
+<tr>
+<td>{{ q.created_at.strftime('%d.%m.%Y %H:%M') }}</td>
+<td><strong>{{ q.document_number }}</strong></td>
+<td>{{ q.production_batch.batch_number }}</td>
+<td>{{ q.production_batch.product.name }}</td>
+<td>{{ q.strength_percent if q.strength_percent is not none else '—' }}</td>
+<td>{{ q.co2_value if q.co2_value is not none else '—' }}</td>
+<td>{{ q.color_result or '—' }} / {{ q.smell_result or '—' }} / {{ q.taste_result or '—' }}</td>
+<td>
+{% if q.status == 'approved' %}<span class="badge ok">Одобрено</span>
+{% elif q.status == 'conditional' %}<span class="badge warning">Условно</span>
+{% else %}<span class="badge danger">Отклонено</span>{% endif %}
+</td>
+<td>{{ q.checked_by }}</td>
+</tr>
+{% else %}
+<tr><td colspan="9">Проверок качества пока нет.</td></tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+</section>
+</main>
+
+<script>
+const eventType = document.getElementById("event-type");
+const productField = document.getElementById("product-field");
+const materialField = document.getElementById("material-field");
+
+function updateEventFields() {
+  const rawLoss = eventType.value === "raw_loss";
+  productField.style.display = rawLoss ? "none" : "block";
+  materialField.style.display = rawLoss ? "block" : "none";
+}
+eventType.addEventListener("change", updateEventFields);
+updateEventFields();
+</script>
+</body>
+</html>

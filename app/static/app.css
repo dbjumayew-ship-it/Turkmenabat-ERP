@@ -33,3 +33,19 @@ button:disabled {
   opacity: .55;
   cursor: not-allowed;
 }
+
+
+.badge.warning {
+  background: #fff3cd;
+  color: #7a5200;
+}
+.metric-card span {
+  color: #607080;
+  font-size: 14px;
+}
+
+
+.badge.danger {
+  background: #fee4e2;
+  color: #b42318;
+}

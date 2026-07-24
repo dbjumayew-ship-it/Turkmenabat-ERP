@@ -119,3 +119,93 @@ class RecipeItem(Base):
     note: Mapped[str] = mapped_column(String(300), default="")
     product: Mapped[Product] = relationship(back_populates="recipe_items")
     material: Mapped[RawMaterial] = relationship()
+
+
+class ProductionBatch(Base):
+    __tablename__ = "production_batches"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    batch_number: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), index=True)
+    output_quantity: Mapped[Decimal] = mapped_column(Numeric(14, 3))
+    status: Mapped[str] = mapped_column(String(20), default="posted")
+    note: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[str] = mapped_column(String(80))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    product: Mapped[Product] = relationship()
+    consumptions: Mapped[list["ProductionConsumption"]] = relationship(
+        back_populates="batch", cascade="all, delete-orphan"
+    )
+
+class ProductionConsumption(Base):
+    __tablename__ = "production_consumptions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    production_batch_id: Mapped[int] = mapped_column(
+        ForeignKey("production_batches.id"), index=True
+    )
+    material_id: Mapped[int] = mapped_column(ForeignKey("raw_materials.id"), index=True)
+    required_quantity: Mapped[Decimal] = mapped_column(Numeric(14, 4))
+    batch: Mapped[ProductionBatch] = relationship(back_populates="consumptions")
+    material: Mapped[RawMaterial] = relationship()
+
+class FinishedGoodsMovement(Base):
+    __tablename__ = "finished_goods_movements"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), index=True)
+    movement_type: Mapped[str] = mapped_column(String(20))
+    quantity: Mapped[Decimal] = mapped_column(Numeric(14, 3))
+    document_number: Mapped[str] = mapped_column(String(80), default="")
+    destination_or_customer: Mapped[str] = mapped_column(String(200), default="")
+    note: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[str] = mapped_column(String(80))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    product: Mapped[Product] = relationship()
+
+
+class ProductionEvent(Base):
+    __tablename__ = "production_events"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    document_number: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    event_type: Mapped[str] = mapped_column(String(30), index=True)
+    product_id: Mapped[int | None] = mapped_column(
+        ForeignKey("products.id"), nullable=True, index=True
+    )
+    material_id: Mapped[int | None] = mapped_column(
+        ForeignKey("raw_materials.id"), nullable=True, index=True
+    )
+    production_batch_id: Mapped[int | None] = mapped_column(
+        ForeignKey("production_batches.id"), nullable=True, index=True
+    )
+    quantity: Mapped[Decimal] = mapped_column(Numeric(14, 4))
+    reason: Mapped[str] = mapped_column(String(120))
+    responsible_person: Mapped[str] = mapped_column(String(160), default="")
+    note: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[str] = mapped_column(String(80))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+    product: Mapped[Product | None] = relationship()
+    material: Mapped[RawMaterial | None] = relationship()
+    production_batch: Mapped[ProductionBatch | None] = relationship()
+
+class QualityControlRecord(Base):
+    __tablename__ = "quality_control_records"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    document_number: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    production_batch_id: Mapped[int] = mapped_column(
+        ForeignKey("production_batches.id"), index=True
+    )
+    strength_percent: Mapped[Decimal | None] = mapped_column(
+        Numeric(8, 3), nullable=True
+    )
+    co2_value: Mapped[Decimal | None] = mapped_column(
+        Numeric(8, 3), nullable=True
+    )
+    color_result: Mapped[str] = mapped_column(String(60), default="")
+    smell_result: Mapped[str] = mapped_column(String(60), default="")
+    taste_result: Mapped[str] = mapped_column(String(60), default="")
+    status: Mapped[str] = mapped_column(String(20), default="approved")
+    checked_by: Mapped[str] = mapped_column(String(160))
+    note: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[str] = mapped_column(String(80))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+    production_batch: Mapped[ProductionBatch] = relationship()

@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Производство — Türkmenabat ERP</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="topbar">
+<strong>Türkmenabat ERP</strong>
+<nav>
+<a href="/dashboard">Главная</a>
+<a href="/warehouse/raw-materials">Склад</a>
+<a href="/suppliers">Поставщики</a>
+<a href="/purchases">Закупки</a>
+<a href="/recipes">Рецептуры</a>
+<a href="/production">Производство</a><a href="/production/control">Контроль производства</a>
+<a href="/finished-goods">Готовая продукция</a>
+<a href="/logout">Выйти</a>
+</nav>
+</header>
+
+<main class="container">
+<div class="page-head">
+<p class="eyebrow">ПРОИЗВОДСТВО</p>
+<h1>Производственные партии</h1>
+<p>ERP рассчитывает потребность, проверяет остатки, списывает сырьё и приходует готовую продукцию.</p>
+</div>
+
+{% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+{% if success %}<div class="alert success">{{ success }}</div>{% endif %}
+
+<section class="panel">
+<h2>Провести производство</h2>
+{% if not products %}
+<div class="alert error">Сначала создайте продукт и его рецептуру.</div>
+{% endif %}
+<form action="/production/create" method="post" class="form-grid">
+<label>Номер партии
+<input name="batch_number" placeholder="PRD-0001" required>
+</label>
+<label>Продукт
+<select name="product_id" required>
+{% for product in products %}
+<option value="{{ product.id }}">
+{{ product.code }} — {{ product.name }} / база {{ product.base_batch_quantity }} {{ product.output_unit }}
+</option>
+{% endfor %}
+</select>
+</label>
+<label>Количество выпуска
+<input name="output_quantity" type="number" min="0.001" step="0.001" required>
+</label>
+<label class="wide">Примечание
+<input name="note" placeholder="Смена, линия, ответственный технолог">
+</label>
+<button class="wide" {% if not products %}disabled{% endif %}>Проверить и провести</button>
+</form>
+</section>
+
+<section class="panel">
+<h2>Готовность продукции к выпуску</h2>
+{% for row in product_rows %}
+<div class="recipe-card">
+<div class="recipe-title">
+<div>
+<h3>{{ row.product.code }} — {{ row.product.name }}</h3>
+<p>Готовый остаток: <strong>{{ row.finished_stock }} {{ row.product.output_unit }}</strong></p>
+</div>
+<span class="badge ok">База {{ row.product.base_batch_quantity }}</span>
+</div>
+<div class="table-wrap">
+<table>
+<thead>
+<tr><th>Сырьё</th><th>Нужно на базу</th><th>Есть на складе</th><th>Состояние</th></tr>
+</thead>
+<tbody>
+{% for item in row.materials %}
+<tr>
+<td>{{ item.material.name }}</td>
+<td>{{ item.required_for_base }} {{ item.material.unit }}</td>
+<td>{{ item.available }} {{ item.material.unit }}</td>
+<td>
+{% if item.available >= item.required_for_base %}
+<span class="badge ok">Достаточно</span>
+{% else %}
+<span class="badge warning">Недостаточно</span>
+{% endif %}
+</td>
+</tr>
+{% else %}
+<tr><td colspan="4">Рецептура не заполнена.</td></tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+</div>
+{% else %}
+<p>Продукты пока не созданы.</p>
+{% endfor %}
+</section>
+
+<section class="panel">
+<h2>Последние производственные партии</h2>
+<div class="table-wrap">
+<table>
+<thead>
+<tr><th>Дата</th><th>Партия</th><th>Продукт</th><th>Выпуск</th><th>Списано компонентов</th><th>Статус</th></tr>
+</thead>
+<tbody>
+{% for batch in batches %}
+<tr>
+<td>{{ batch.created_at.strftime('%d.%m.%Y %H:%M') }}</td>
+<td><strong>{{ batch.batch_number }}</strong></td>
+<td>{{ batch.product.name }}</td>
+<td>{{ batch.output_quantity }} {{ batch.product.output_unit }}</td>
+<td>{{ batch.consumptions|length }}</td>
+<td><span class="badge ok">Проведена</span></td>
+</tr>
+{% else %}
+<tr><td colspan="6">Производственных партий пока нет.</td></tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+</section>
+</main>
+</body>
+</html>

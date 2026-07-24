@@ -14,7 +14,9 @@ from sqlalchemy.orm import Session
 from .database import Base, SessionLocal, engine, get_db
 from .models import (
     AuditLog, DashboardMetric, Purchase, PurchaseItem, RawMaterial,
-    RawMaterialMovement, RecipeItem, Product, Supplier, User
+    RawMaterialMovement, RecipeItem, Product, Supplier, User,
+    ProductionBatch, ProductionConsumption, FinishedGoodsMovement,
+    ProductionEvent, QualityControlRecord
 )
 from .security import create_token, decode_token, hash_password, verify_password
 
@@ -417,3 +419,495 @@ def delete_recipe_item(
     ))
     db.commit()
     return RedirectResponse("/recipes?success=Компонент удалён", 303)
+
+
+def finished_stock_for_product(db: Session, product_id: int) -> Decimal:
+    total = db.query(
+        func.coalesce(func.sum(case(
+            (FinishedGoodsMovement.movement_type == "receipt", FinishedGoodsMovement.quantity),
+            else_=-FinishedGoodsMovement.quantity,
+        )), 0)
+    ).filter(FinishedGoodsMovement.product_id == product_id).scalar()
+    return Decimal(total or 0)
+
+@app.get("/production", response_class=HTMLResponse)
+def production_page(request: Request, db: Session = Depends(get_db)):
+    try:
+        user = current_user(request, db)
+    except HTTPException:
+        return RedirectResponse("/", 303)
+
+    products = (
+        db.query(Product)
+        .filter(Product.is_active == True)
+        .order_by(Product.name)
+        .all()
+    )
+    batches = (
+        db.query(ProductionBatch)
+        .order_by(ProductionBatch.created_at.desc())
+        .limit(50)
+        .all()
+    )
+
+    product_rows = []
+    for product in products:
+        shortages = []
+        for item in product.recipe_items:
+            available = stock_for_material(db, item.material_id)
+            shortages.append({
+                "material": item.material,
+                "available": available,
+                "required_for_base": item.quantity,
+            })
+        product_rows.append({
+            "product": product,
+            "finished_stock": finished_stock_for_product(db, product.id),
+            "materials": shortages,
+        })
+
+    return templates.TemplateResponse("production.html", {
+        "request": request,
+        "user": user,
+        "products": products,
+        "product_rows": product_rows,
+        "batches": batches,
+        "error": request.query_params.get("error"),
+        "success": request.query_params.get("success"),
+    })
+
+@app.post("/production/create")
+def create_production_batch(
+    request: Request,
+    batch_number: str = Form(...),
+    product_id: int = Form(...),
+    output_quantity: str = Form(...),
+    note: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    try:
+        user = current_user(request, db)
+    except HTTPException:
+        return RedirectResponse("/", 303)
+
+    batch_number = batch_number.strip().upper()
+    if not batch_number:
+        return RedirectResponse("/production?error=Укажите номер производственной партии", 303)
+
+    if db.query(ProductionBatch).filter(
+        ProductionBatch.batch_number == batch_number
+    ).first():
+        return RedirectResponse("/production?error=Такой номер партии уже существует", 303)
+
+    product = db.get(Product, product_id)
+    if not product:
+        return RedirectResponse("/production?error=Продукт не найден", 303)
+
+    if not product.recipe_items:
+        return RedirectResponse(
+            "/production?error=Для продукта не создана рецептура", 303
+        )
+
+    output_qty = safe_decimal(output_quantity)
+    base_qty = Decimal(product.base_batch_quantity)
+    if base_qty <= 0:
+        return RedirectResponse(
+            "/production?error=У продукта неверно указана базовая партия", 303
+        )
+
+    multiplier = output_qty / base_qty
+    required_rows = []
+    shortage_messages = []
+
+    for item in product.recipe_items:
+        required = (Decimal(item.quantity) * multiplier).quantize(Decimal("0.0001"))
+        available = stock_for_material(db, item.material_id)
+        required_rows.append((item, required, available))
+        if required > available:
+            shortage = required - available
+            shortage_messages.append(
+                f"{item.material.name}: не хватает {shortage} {item.material.unit}"
+            )
+
+    if shortage_messages:
+        message = "; ".join(shortage_messages)
+        return RedirectResponse(f"/production?error={message}", 303)
+
+    try:
+        batch = ProductionBatch(
+            batch_number=batch_number,
+            product_id=product.id,
+            output_quantity=output_qty,
+            status="posted",
+            note=note.strip(),
+            created_by=user.username,
+        )
+        db.add(batch)
+        db.flush()
+
+        for item, required, _available in required_rows:
+            db.add(ProductionConsumption(
+                production_batch_id=batch.id,
+                material_id=item.material_id,
+                required_quantity=required,
+            ))
+            db.add(RawMaterialMovement(
+                material_id=item.material_id,
+                movement_type="issue",
+                quantity=required,
+                unit_price=0,
+                supplier_or_destination=f"Производство: {product.name}",
+                document_number=batch_number,
+                note=f"Автоматическое списание по партии {batch_number}",
+                created_by=user.username,
+            ))
+
+        db.add(FinishedGoodsMovement(
+            product_id=product.id,
+            movement_type="receipt",
+            quantity=output_qty,
+            document_number=batch_number,
+            destination_or_customer="Склад готовой продукции",
+            note=f"Выпуск по производственной партии {batch_number}",
+            created_by=user.username,
+        ))
+
+        db.add(AuditLog(
+            username=user.username,
+            action="production_post",
+            details=f"{batch_number}: {product.code}, выпуск {output_qty} {product.output_unit}",
+        ))
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    return RedirectResponse(
+        "/production?success=Производственная партия проведена, сырьё списано, продукция оприходована",
+        303,
+    )
+
+@app.get("/finished-goods", response_class=HTMLResponse)
+def finished_goods_page(request: Request, db: Session = Depends(get_db)):
+    try:
+        user = current_user(request, db)
+    except HTTPException:
+        return RedirectResponse("/", 303)
+
+    products = (
+        db.query(Product)
+        .filter(Product.is_active == True)
+        .order_by(Product.name)
+        .all()
+    )
+    rows = [
+        {"product": product, "stock": finished_stock_for_product(db, product.id)}
+        for product in products
+    ]
+    movements = (
+        db.query(FinishedGoodsMovement)
+        .order_by(FinishedGoodsMovement.created_at.desc())
+        .limit(100)
+        .all()
+    )
+
+    return templates.TemplateResponse("finished_goods.html", {
+        "request": request,
+        "user": user,
+        "rows": rows,
+        "movements": movements,
+    })
+
+
+PRODUCTION_EVENT_LABELS = {
+    "defect": "Брак производства",
+    "finished_writeoff": "Списание готовой продукции",
+    "raw_loss": "Потеря сырья",
+    "rework": "Передача в переработку",
+}
+
+FINISHED_REASONS = [
+    "Разбитая бутылка",
+    "Неправильная крышка",
+    "Повреждённая этикетка",
+    "Неправильный уровень наполнения",
+    "Утечка",
+    "Грязная бутылка",
+    "Повреждение упаковки",
+    "Истёк срок годности",
+    "Повреждение при хранении",
+    "Повреждение при погрузке",
+    "Лабораторный образец",
+    "Другое",
+]
+
+RAW_LOSS_REASONS = [
+    "Испарение",
+    "Пролив",
+    "Потери при запуске линии",
+    "Остаток в трубопроводе",
+    "Промывка оборудования / CIP",
+    "Лабораторный образец",
+    "Повреждение тары",
+    "Другое",
+]
+
+@app.get("/production/control", response_class=HTMLResponse)
+def production_control_page(request: Request, db: Session = Depends(get_db)):
+    try:
+        user = current_user(request, db)
+    except HTTPException:
+        return RedirectResponse("/", 303)
+
+    products = (
+        db.query(Product)
+        .filter(Product.is_active == True)
+        .order_by(Product.name)
+        .all()
+    )
+    materials = (
+        db.query(RawMaterial)
+        .filter(RawMaterial.is_active == True)
+        .order_by(RawMaterial.name)
+        .all()
+    )
+    batches = (
+        db.query(ProductionBatch)
+        .order_by(ProductionBatch.created_at.desc())
+        .limit(100)
+        .all()
+    )
+    events = (
+        db.query(ProductionEvent)
+        .order_by(ProductionEvent.created_at.desc())
+        .limit(100)
+        .all()
+    )
+    quality_records = (
+        db.query(QualityControlRecord)
+        .order_by(QualityControlRecord.created_at.desc())
+        .limit(100)
+        .all()
+    )
+
+    total_produced = db.query(
+        func.coalesce(func.sum(ProductionBatch.output_quantity), 0)
+    ).scalar()
+
+    defect_total = db.query(
+        func.coalesce(func.sum(ProductionEvent.quantity), 0)
+    ).filter(ProductionEvent.event_type == "defect").scalar()
+
+    writeoff_total = db.query(
+        func.coalesce(func.sum(ProductionEvent.quantity), 0)
+    ).filter(ProductionEvent.event_type == "finished_writeoff").scalar()
+
+    rework_total = db.query(
+        func.coalesce(func.sum(ProductionEvent.quantity), 0)
+    ).filter(ProductionEvent.event_type == "rework").scalar()
+
+    produced_decimal = Decimal(total_produced or 0)
+    defect_decimal = Decimal(defect_total or 0)
+    efficiency = Decimal("100.00")
+    if produced_decimal > 0:
+        efficiency = (
+            (produced_decimal - defect_decimal) / produced_decimal * Decimal("100")
+        ).quantize(Decimal("0.01"))
+
+    return templates.TemplateResponse("production_control.html", {
+        "request": request,
+        "user": user,
+        "products": products,
+        "materials": materials,
+        "batches": batches,
+        "events": events,
+        "quality_records": quality_records,
+        "event_labels": PRODUCTION_EVENT_LABELS,
+        "finished_reasons": FINISHED_REASONS,
+        "raw_loss_reasons": RAW_LOSS_REASONS,
+        "stats": {
+            "produced": produced_decimal,
+            "defect": defect_decimal,
+            "writeoff": Decimal(writeoff_total or 0),
+            "rework": Decimal(rework_total or 0),
+            "efficiency": efficiency,
+        },
+        "error": request.query_params.get("error"),
+        "success": request.query_params.get("success"),
+    })
+
+@app.post("/production/events/create")
+def create_production_event(
+    request: Request,
+    document_number: str = Form(...),
+    event_type: str = Form(...),
+    quantity: str = Form(...),
+    reason: str = Form(...),
+    product_id: int | None = Form(None),
+    material_id: int | None = Form(None),
+    production_batch_id: int | None = Form(None),
+    responsible_person: str = Form(""),
+    note: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    try:
+        user = current_user(request, db)
+    except HTTPException:
+        return RedirectResponse("/", 303)
+
+    document_number = document_number.strip().upper()
+    if event_type not in PRODUCTION_EVENT_LABELS:
+        return RedirectResponse("/production/control?error=Неверный тип операции", 303)
+
+    if db.query(ProductionEvent).filter(
+        ProductionEvent.document_number == document_number
+    ).first():
+        return RedirectResponse(
+            "/production/control?error=Документ с таким номером уже существует", 303
+        )
+
+    qty = safe_decimal(quantity)
+    product = db.get(Product, product_id) if product_id else None
+    material = db.get(RawMaterial, material_id) if material_id else None
+    batch = db.get(ProductionBatch, production_batch_id) if production_batch_id else None
+
+    finished_event = event_type in {"defect", "finished_writeoff", "rework"}
+    raw_event = event_type == "raw_loss"
+
+    if finished_event:
+        if not product:
+            return RedirectResponse(
+                "/production/control?error=Выберите готовый продукт", 303
+            )
+        available = finished_stock_for_product(db, product.id)
+        if qty > available:
+            return RedirectResponse(
+                "/production/control?error=Недостаточно готовой продукции на складе", 303
+            )
+
+    if raw_event:
+        if not material:
+            return RedirectResponse(
+                "/production/control?error=Выберите сырьё", 303
+            )
+        available = stock_for_material(db, material.id)
+        if qty > available:
+            return RedirectResponse(
+                "/production/control?error=Недостаточно сырья на складе", 303
+            )
+
+    event = ProductionEvent(
+        document_number=document_number,
+        event_type=event_type,
+        product_id=product.id if product else None,
+        material_id=material.id if material else None,
+        production_batch_id=batch.id if batch else None,
+        quantity=qty,
+        reason=reason.strip(),
+        responsible_person=responsible_person.strip(),
+        note=note.strip(),
+        created_by=user.username,
+    )
+    db.add(event)
+
+    if finished_event:
+        db.add(FinishedGoodsMovement(
+            product_id=product.id,
+            movement_type="issue",
+            quantity=qty,
+            document_number=document_number,
+            destination_or_customer=PRODUCTION_EVENT_LABELS[event_type],
+            note=f"{reason}. {note}".strip(),
+            created_by=user.username,
+        ))
+
+    if raw_event:
+        db.add(RawMaterialMovement(
+            material_id=material.id,
+            movement_type="issue",
+            quantity=qty,
+            unit_price=0,
+            supplier_or_destination="Производственные потери",
+            document_number=document_number,
+            note=f"{reason}. {note}".strip(),
+            created_by=user.username,
+        ))
+
+    db.add(AuditLog(
+        username=user.username,
+        action=f"production_{event_type}",
+        details=(
+            f"{document_number}: {PRODUCTION_EVENT_LABELS[event_type]}, "
+            f"{qty}, причина: {reason}"
+        ),
+    ))
+    db.commit()
+    return RedirectResponse(
+        "/production/control?success=Операция проведена и остатки обновлены", 303
+    )
+
+@app.post("/production/quality/create")
+def create_quality_control(
+    request: Request,
+    document_number: str = Form(...),
+    production_batch_id: int = Form(...),
+    strength_percent: str = Form(""),
+    co2_value: str = Form(""),
+    color_result: str = Form(""),
+    smell_result: str = Form(""),
+    taste_result: str = Form(""),
+    status: str = Form(...),
+    checked_by: str = Form(...),
+    note: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    try:
+        user = current_user(request, db)
+    except HTTPException:
+        return RedirectResponse("/", 303)
+
+    document_number = document_number.strip().upper()
+    if status not in {"approved", "rejected", "conditional"}:
+        return RedirectResponse(
+            "/production/control?error=Неверный статус контроля качества", 303
+        )
+
+    if db.query(QualityControlRecord).filter(
+        QualityControlRecord.document_number == document_number
+    ).first():
+        return RedirectResponse(
+            "/production/control?error=Документ контроля уже существует", 303
+        )
+
+    batch = db.get(ProductionBatch, production_batch_id)
+    if not batch:
+        return RedirectResponse(
+            "/production/control?error=Производственная партия не найдена", 303
+        )
+
+    strength = safe_decimal(strength_percent, allow_zero=True) if strength_percent.strip() else None
+    co2 = safe_decimal(co2_value, allow_zero=True) if co2_value.strip() else None
+
+    record = QualityControlRecord(
+        document_number=document_number,
+        production_batch_id=batch.id,
+        strength_percent=strength,
+        co2_value=co2,
+        color_result=color_result.strip(),
+        smell_result=smell_result.strip(),
+        taste_result=taste_result.strip(),
+        status=status,
+        checked_by=checked_by.strip(),
+        note=note.strip(),
+        created_by=user.username,
+    )
+    db.add(record)
+    db.add(AuditLog(
+        username=user.username,
+        action="quality_control_create",
+        details=f"{document_number}: партия {batch.batch_number}, статус {status}",
+    ))
+    db.commit()
+    return RedirectResponse(
+        "/production/control?success=Контроль качества сохранён", 303
+    )

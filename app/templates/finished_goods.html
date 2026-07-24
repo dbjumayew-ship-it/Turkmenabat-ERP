@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Готовая продукция — Türkmenabat ERP</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="topbar">
+<strong>Türkmenabat ERP</strong>
+<nav>
+<a href="/dashboard">Главная</a>
+<a href="/warehouse/raw-materials">Склад</a>
+<a href="/suppliers">Поставщики</a>
+<a href="/purchases">Закупки</a>
+<a href="/recipes">Рецептуры</a>
+<a href="/production">Производство</a><a href="/production/control">Контроль производства</a>
+<a href="/finished-goods">Готовая продукция</a>
+<a href="/logout">Выйти</a>
+</nav>
+</header>
+
+<main class="container">
+<div class="page-head">
+<p class="eyebrow">СКЛАД</p>
+<h1>Готовая продукция</h1>
+<p>Остатки автоматически увеличиваются после проведения производственной партии.</p>
+</div>
+
+<section class="metric-grid">
+{% for row in rows %}
+<article class="metric-card">
+<p>{{ row.product.code }}</p>
+<h2>{{ row.stock }} <small>{{ row.product.output_unit }}</small></h2>
+<span>{{ row.product.name }}</span>
+</article>
+{% else %}
+<p>Продукты пока не созданы.</p>
+{% endfor %}
+</section>
+
+<section class="panel">
+<h2>Движения готовой продукции</h2>
+<div class="table-wrap">
+<table>
+<thead>
+<tr><th>Дата</th><th>Тип</th><th>Продукт</th><th>Количество</th><th>Документ</th><th>Назначение</th></tr>
+</thead>
+<tbody>
+{% for movement in movements %}
+<tr>
+<td>{{ movement.created_at.strftime('%d.%m.%Y %H:%M') }}</td>
+<td>
+{% if movement.movement_type == 'receipt' %}
+<span class="badge ok">Приход</span>
+{% else %}
+<span class="badge warning">Расход</span>
+{% endif %}
+</td>
+<td>{{ movement.product.name }}</td>
+<td>{{ movement.quantity }} {{ movement.product.output_unit }}</td>
+<td>{{ movement.document_number or '—' }}</td>
+<td>{{ movement.destination_or_customer or '—' }}</td>
+</tr>
+{% else %}
+<tr><td colspan="6">Движений пока нет.</td></tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+</section>
+</main>
+</body>
+</html>
