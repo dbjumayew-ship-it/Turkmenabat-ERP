@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Финансы — Türkmenabat ERP</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="topbar"><strong>Türkmenabat ERP</strong><nav>
+<a href="/dashboard">Главная</a><a href="/production">Производство</a>
+<a href="/finished-goods">Готовая продукция</a><a href="/customers">Клиенты</a>
+<a href="/sales">Продажи</a><a href="/finance">Финансы</a><a href="/logout">Выйти</a>
+</nav></header>
+<main class="container">
+<div class="page-head"><p class="eyebrow">ФИНАНСОВЫЙ УЧЁТ</p><h1>Касса, банк, расходы и задолженности</h1>
+<p>Приходы и расходы отражаются по выбранной кассе или банковскому счёту.</p></div>
+
+{% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+{% if success %}<div class="alert success">{{ success }}</div>{% endif %}
+
+<section class="metric-grid">
+<article class="metric-card"><p>Доходы</p><h2>{{ stats.income }} <small>TMT</small></h2></article>
+<article class="metric-card"><p>Расходы</p><h2>{{ stats.expense }} <small>TMT</small></h2></article>
+<article class="metric-card"><p>Финансовый результат</p><h2>{{ stats.profit }} <small>TMT</small></h2></article>
+</section>
+
+<section class="panel"><h2>Кассы и банковские счета</h2>
+<div class="table-wrap"><table><thead><tr><th>Код</th><th>Название</th><th>Тип</th><th>Валюта</th><th>Остаток</th></tr></thead>
+<tbody>{% for row in account_rows %}<tr><td><strong>{{ row.account.code }}</strong></td>
+<td>{{ row.account.name }}</td><td>{{ row.account.account_type }}</td><td>{{ row.account.currency }}</td>
+<td>{{ row.balance }} {{ row.account.currency }}</td></tr>{% endfor %}</tbody></table></div>
+<form action="/finance/accounts/create" method="post" class="form-grid">
+<label>Код<input name="code" placeholder="CASH-USD" required></label>
+<label>Название<input name="name" required></label>
+<label>Тип<select name="account_type"><option value="cash">Касса</option><option value="bank">Банк</option></select></label>
+<label>Валюта<select name="currency"><option>TMT</option><option>USD</option><option>EUR</option></select></label>
+<label>Начальный остаток<input name="opening_balance" type="number" step="0.01" value="0"></label>
+<button>Добавить счёт</button>
+</form></section>
+
+<section class="panel"><h2>Новая финансовая операция</h2>
+<form action="/finance/transactions/create" method="post" class="form-grid">
+<label>Номер документа<input name="document_number" placeholder="PKO-0001 / RKO-0001" required></label>
+<label>Счёт<select name="account_id" required>{% for a in accounts %}<option value="{{ a.id }}">{{ a.code }} — {{ a.name }}</option>{% endfor %}</select></label>
+<label>Операция<select name="transaction_type" id="tx-type">
+<option value="income">Приход</option><option value="expense">Расход</option></select></label>
+<label>Сумма<input name="amount" type="number" min="0.01" step="0.01" required></label>
+<label>Валюта<select name="currency"><option>TMT</option><option>USD</option><option>EUR</option></select></label>
+<label>Способ оплаты<select name="payment_method"><option value="cash">Наличные</option><option value="bank">Банк</option><option value="card">Карта</option><option value="other">Другое</option></select></label>
+<label>Категория расхода<select name="category_id"><option value="">— Не выбрано —</option>{% for c in categories %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}</select></label>
+<label>Клиент<select name="customer_id"><option value="">— Нет —</option>{% for c in customers %}<option value="{{ c.id }}">{{ c.code }} — {{ c.name }}</option>{% endfor %}</select></label>
+<label>Поставщик<select name="supplier_id"><option value="">— Нет —</option>{% for s in suppliers %}<option value="{{ s.id }}">{{ s.code }} — {{ s.name }}</option>{% endfor %}</select></label>
+<label>Отгрузка<select name="related_sale_id"><option value="">— Не связывать —</option>{% for s in sales %}<option value="{{ s.id }}">{{ s.document_number }} — {{ s.customer.name }}</option>{% endfor %}</select></label>
+<label>Контрагент<input name="counterparty"></label>
+<label class="wide">Описание<input name="description"></label>
+<button class="wide">Провести операцию</button>
+</form></section>
+
+<section class="panel"><h2>Курсы валют</h2>
+<form action="/finance/rates/create" method="post" class="form-grid">
+<label>Валюта<select name="currency"><option>USD</option><option>EUR</option></select></label>
+<label>Курс к TMT<input name="rate_to_tmt" type="number" min="0.000001" step="0.000001" required></label>
+<button>Сохранить курс</button>
+</form>
+<div class="table-wrap"><table><thead><tr><th>Дата</th><th>Валюта</th><th>Курс</th></tr></thead><tbody>
+{% for r in rates %}<tr><td>{{ r.effective_date.strftime('%d.%m.%Y %H:%M') }}</td><td>{{ r.currency }}</td><td>1 {{ r.currency }} = {{ r.rate_to_tmt }} TMT</td></tr>
+{% else %}<tr><td colspan="3">Курсы ещё не добавлены.</td></tr>{% endfor %}</tbody></table></div></section>
+
+<section class="panel"><h2>Дебиторская задолженность клиентов</h2>
+<div class="table-wrap"><table><thead><tr><th>Клиент</th><th>Продажи</th><th>Оплачено</th><th>Долг</th></tr></thead><tbody>
+{% for row in customer_rows %}<tr><td>{{ row.customer.name }}</td><td>{{ row.sales_total }} {{ row.customer.currency }}</td><td>{{ row.paid_total }} {{ row.customer.currency }}</td>
+<td>{% if row.debt > 0 %}<span class="badge danger">{{ row.debt }}</span>{% else %}<span class="badge ok">{{ row.debt }}</span>{% endif %}</td></tr>
+{% else %}<tr><td colspan="4">Клиентов нет.</td></tr>{% endfor %}</tbody></table></div></section>
+
+<section class="panel"><h2>Кредиторская задолженность поставщикам</h2>
+<div class="table-wrap"><table><thead><tr><th>Поставщик</th><th>Закупки</th><th>Оплачено</th><th>Долг</th></tr></thead><tbody>
+{% for row in supplier_rows %}<tr><td>{{ row.supplier.name }}</td><td>{{ row.purchases_total }}</td><td>{{ row.paid_total }}</td>
+<td>{% if row.debt > 0 %}<span class="badge danger">{{ row.debt }}</span>{% else %}<span class="badge ok">{{ row.debt }}</span>{% endif %}</td></tr>
+{% else %}<tr><td colspan="4">Поставщиков нет.</td></tr>{% endfor %}</tbody></table></div></section>
+
+<section class="panel"><h2>Журнал финансовых операций</h2>
+<div class="table-wrap"><table><thead><tr><th>Дата</th><th>Документ</th><th>Тип</th><th>Счёт</th><th>Сумма</th><th>Контрагент</th><th>Описание</th><th>Печать</th></tr></thead>
+<tbody>{% for tx in transactions %}<tr>
+<td>{{ tx.created_at.strftime('%d.%m.%Y %H:%M') }}</td><td><strong>{{ tx.document_number }}</strong></td>
+<td>{% if tx.transaction_type == 'income' %}<span class="badge ok">Приход</span>{% else %}<span class="badge danger">Расход</span>{% endif %}</td>
+<td>{{ tx.account.name }}</td><td>{{ tx.amount }} {{ tx.currency }}</td>
+<td>{% if tx.customer %}{{ tx.customer.name }}{% elif tx.supplier %}{{ tx.supplier.name }}{% else %}{{ tx.counterparty or '—' }}{% endif %}</td>
+<td>{{ tx.description or '—' }}</td><td><a href="/finance/transaction/{{ tx.id }}/print" target="_blank">Открыть</a></td></tr>
+{% else %}<tr><td colspan="8">Операций пока нет.</td></tr>{% endfor %}</tbody></table></div></section>
+</main></body></html>

@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ru">
+<head><meta charset="utf-8"><title>{{ tx.document_number }}</title>
+<style>
+body{font-family:Arial,sans-serif;margin:32px;color:#111}h1{margin-bottom:6px}.meta{color:#555}
+table{width:100%;border-collapse:collapse;margin-top:25px}th,td{border:1px solid #333;padding:10px;text-align:left}
+.signatures{display:grid;grid-template-columns:1fr 1fr;gap:80px;margin-top:70px}.line{border-top:1px solid #111;padding-top:6px}
+.actions{margin-bottom:20px}@media print{.actions{display:none}body{margin:10mm}}
+</style></head>
+<body>
+<div class="actions"><button onclick="window.print()">Печать / PDF</button></div>
+<h1>{% if tx.transaction_type == 'income' %}ПРИХОДНЫЙ КАССОВЫЙ ОРДЕР{% else %}РАСХОДНЫЙ КАССОВЫЙ ОРДЕР{% endif %}</h1>
+<p><strong>№ {{ tx.document_number }}</strong></p><p class="meta">{{ tx.created_at.strftime('%d.%m.%Y %H:%M') }}</p>
+<table>
+<tr><th>Касса / счёт</th><td>{{ tx.account.name }} ({{ tx.account.code }})</td></tr>
+<tr><th>Сумма</th><td>{{ tx.amount }} {{ tx.currency }}</td></tr>
+<tr><th>Способ</th><td>{{ tx.payment_method }}</td></tr>
+<tr><th>Контрагент</th><td>{% if tx.customer %}{{ tx.customer.name }}{% elif tx.supplier %}{{ tx.supplier.name }}{% else %}{{ tx.counterparty or '—' }}{% endif %}</td></tr>
+<tr><th>Основание</th><td>{{ tx.description or '—' }}</td></tr>
+</table>
+<div class="signatures"><div class="line">Бухгалтер</div><div class="line">Получил / внёс</div></div>
+</body></html>

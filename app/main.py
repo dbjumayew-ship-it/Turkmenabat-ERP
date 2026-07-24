@@ -17,7 +17,8 @@ from .models import (
     RawMaterialMovement, RecipeItem, Product, Supplier, User,
     ProductionBatch, ProductionConsumption, FinishedGoodsMovement,
     ProductionEvent, QualityControlRecord,
-    Customer, Sale, SaleItem, CustomerPayment
+    Customer, Sale, SaleItem, CustomerPayment,
+    CashAccount, ExpenseCategory, FinanceTransaction, ExchangeRate
 )
 from .security import create_token, decode_token, hash_password, verify_password
 
@@ -52,7 +53,7 @@ async def lifespan(app: FastAPI):
     seed()
     yield
 
-app = FastAPI(title="Türkmenabat ERP API", version="0.7.0", lifespan=lifespan)
+app = FastAPI(title="Türkmenabat ERP API", version="0.8.0", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
@@ -92,7 +93,7 @@ def safe_decimal(value: str, allow_zero: bool = False) -> Decimal:
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": "0.7.0"}
+    return {"status": "ok", "version": "0.8.0"}
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
@@ -1244,4 +1245,299 @@ def sale_invoice(sale_id: int, request: Request, db: Session = Depends(get_db)):
         "total": total,
         "paid": Decimal(paid or 0),
         "debt": total - Decimal(paid or 0),
+    })
+
+
+DEFAULT_EXPENSE_CATEGORIES = [
+    ("SALARY", "Зарплата"),
+    ("ELECTRICITY", "Электроэнергия"),
+    ("GAS", "Газ"),
+    ("WATER", "Вода"),
+    ("TRANSPORT", "Транспорт"),
+    ("REPAIR", "Ремонт"),
+    ("EQUIPMENT", "Оборудование"),
+    ("TAX", "Налоги"),
+    ("PACKAGING", "Упаковка"),
+    ("OTHER", "Прочие расходы"),
+]
+
+def seed_finance_defaults(db: Session) -> None:
+    if db.query(CashAccount).count() == 0:
+        db.add_all([
+            CashAccount(code="CASH-TMT", name="Основная касса TMT", account_type="cash", currency="TMT"),
+            CashAccount(code="BANK-TMT", name="Расчётный счёт TMT", account_type="bank", currency="TMT"),
+        ])
+    existing_codes = {
+        row.code for row in db.query(ExpenseCategory).all()
+    }
+    for code, name in DEFAULT_EXPENSE_CATEGORIES:
+        if code not in existing_codes:
+            db.add(ExpenseCategory(code=code, name=name))
+    db.commit()
+
+def account_balance(db: Session, account: CashAccount) -> Decimal:
+    income = db.query(
+        func.coalesce(func.sum(FinanceTransaction.amount), 0)
+    ).filter(
+        FinanceTransaction.account_id == account.id,
+        FinanceTransaction.transaction_type == "income",
+    ).scalar()
+    expense = db.query(
+        func.coalesce(func.sum(FinanceTransaction.amount), 0)
+    ).filter(
+        FinanceTransaction.account_id == account.id,
+        FinanceTransaction.transaction_type == "expense",
+    ).scalar()
+    return Decimal(account.opening_balance or 0) + Decimal(income or 0) - Decimal(expense or 0)
+
+def total_by_type(db: Session, transaction_type: str) -> Decimal:
+    value = db.query(
+        func.coalesce(func.sum(FinanceTransaction.amount), 0)
+    ).filter(FinanceTransaction.transaction_type == transaction_type).scalar()
+    return Decimal(value or 0)
+
+def supplier_purchases_total(db: Session, supplier_id: int) -> Decimal:
+    purchases = db.query(Purchase).filter(Purchase.supplier_id == supplier_id).all()
+    total = Decimal("0")
+    for purchase in purchases:
+        for item in purchase.items:
+            total += Decimal(item.quantity) * Decimal(item.unit_price)
+    return total
+
+def supplier_payments_total(db: Session, supplier_id: int) -> Decimal:
+    value = db.query(
+        func.coalesce(func.sum(FinanceTransaction.amount), 0)
+    ).filter(
+        FinanceTransaction.supplier_id == supplier_id,
+        FinanceTransaction.transaction_type == "expense",
+    ).scalar()
+    return Decimal(value or 0)
+
+@app.get("/finance", response_class=HTMLResponse)
+def finance_page(request: Request, db: Session = Depends(get_db)):
+    try:
+        user = current_user(request, db)
+    except HTTPException:
+        return RedirectResponse("/", 303)
+
+    seed_finance_defaults(db)
+    accounts = db.query(CashAccount).filter(CashAccount.is_active == True).order_by(CashAccount.name).all()
+    categories = db.query(ExpenseCategory).filter(ExpenseCategory.is_active == True).order_by(ExpenseCategory.name).all()
+    customers = db.query(Customer).filter(Customer.is_active == True).order_by(Customer.name).all()
+    suppliers = db.query(Supplier).filter(Supplier.is_active == True).order_by(Supplier.name).all()
+    sales = db.query(Sale).order_by(Sale.created_at.desc()).limit(100).all()
+    transactions = db.query(FinanceTransaction).order_by(FinanceTransaction.created_at.desc()).limit(200).all()
+    rates = db.query(ExchangeRate).order_by(ExchangeRate.effective_date.desc()).limit(20).all()
+
+    account_rows = [{"account": a, "balance": account_balance(db, a)} for a in accounts]
+
+    customer_rows = []
+    for c in customers:
+        sales_total = customer_sales_total(db, c.id)
+        paid_total = customer_payments_total(db, c.id)
+        customer_rows.append({
+            "customer": c,
+            "sales_total": sales_total,
+            "paid_total": paid_total,
+            "debt": sales_total - paid_total,
+        })
+
+    supplier_rows = []
+    for s in suppliers:
+        purchases_total = supplier_purchases_total(db, s.id)
+        paid_total = supplier_payments_total(db, s.id)
+        supplier_rows.append({
+            "supplier": s,
+            "purchases_total": purchases_total,
+            "paid_total": paid_total,
+            "debt": purchases_total - paid_total,
+        })
+
+    income_total = total_by_type(db, "income")
+    expense_total = total_by_type(db, "expense")
+
+    return templates.TemplateResponse("finance.html", {
+        "request": request,
+        "user": user,
+        "accounts": accounts,
+        "account_rows": account_rows,
+        "categories": categories,
+        "customers": customers,
+        "suppliers": suppliers,
+        "sales": sales,
+        "transactions": transactions,
+        "rates": rates,
+        "customer_rows": customer_rows,
+        "supplier_rows": supplier_rows,
+        "stats": {
+            "income": income_total,
+            "expense": expense_total,
+            "profit": income_total - expense_total,
+        },
+        "error": request.query_params.get("error"),
+        "success": request.query_params.get("success"),
+    })
+
+@app.post("/finance/accounts/create")
+def create_finance_account(
+    request: Request,
+    code: str = Form(...),
+    name: str = Form(...),
+    account_type: str = Form("cash"),
+    currency: str = Form("TMT"),
+    opening_balance: str = Form("0"),
+    db: Session = Depends(get_db),
+):
+    try:
+        user = current_user(request, db)
+    except HTTPException:
+        return RedirectResponse("/", 303)
+
+    code = code.strip().upper()
+    if db.query(CashAccount).filter(CashAccount.code == code).first():
+        return RedirectResponse("/finance?error=Код кассы или счёта уже существует", 303)
+
+    account = CashAccount(
+        code=code,
+        name=name.strip(),
+        account_type=account_type,
+        currency=currency.strip().upper(),
+        opening_balance=safe_decimal(opening_balance, allow_zero=True),
+    )
+    db.add(account)
+    db.add(AuditLog(
+        username=user.username,
+        action="finance_account_create",
+        details=f"{code}: {name.strip()}",
+    ))
+    db.commit()
+    return RedirectResponse("/finance?success=Касса или банковский счёт добавлен", 303)
+
+@app.post("/finance/transactions/create")
+def create_finance_transaction(
+    request: Request,
+    document_number: str = Form(...),
+    account_id: int = Form(...),
+    transaction_type: str = Form(...),
+    amount: str = Form(...),
+    currency: str = Form("TMT"),
+    category_id: int | None = Form(None),
+    customer_id: int | None = Form(None),
+    supplier_id: int | None = Form(None),
+    related_sale_id: int | None = Form(None),
+    payment_method: str = Form("cash"),
+    counterparty: str = Form(""),
+    description: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    try:
+        user = current_user(request, db)
+    except HTTPException:
+        return RedirectResponse("/", 303)
+
+    document_number = document_number.strip().upper()
+    if transaction_type not in {"income", "expense"}:
+        return RedirectResponse("/finance?error=Неверный тип операции", 303)
+    if db.query(FinanceTransaction).filter(
+        FinanceTransaction.document_number == document_number
+    ).first():
+        return RedirectResponse("/finance?error=Документ с таким номером уже существует", 303)
+
+    account = db.get(CashAccount, account_id)
+    customer = db.get(Customer, customer_id) if customer_id else None
+    supplier = db.get(Supplier, supplier_id) if supplier_id else None
+    sale = db.get(Sale, related_sale_id) if related_sale_id else None
+    if not account:
+        return RedirectResponse("/finance?error=Касса или банковский счёт не найден", 303)
+
+    qty = safe_decimal(amount)
+    if transaction_type == "expense" and qty > account_balance(db, account):
+        return RedirectResponse("/finance?error=Недостаточно средств на выбранном счёте", 303)
+
+    tx = FinanceTransaction(
+        document_number=document_number,
+        account_id=account.id,
+        transaction_type=transaction_type,
+        amount=qty,
+        currency=currency.strip().upper(),
+        category_id=category_id,
+        customer_id=customer.id if customer else None,
+        supplier_id=supplier.id if supplier else None,
+        related_sale_id=sale.id if sale else None,
+        payment_method=payment_method,
+        counterparty=counterparty.strip(),
+        description=description.strip(),
+        created_by=user.username,
+    )
+    db.add(tx)
+
+    if transaction_type == "income" and customer:
+        db.add(CustomerPayment(
+            document_number=f"CP-{document_number}",
+            customer_id=customer.id,
+            sale_id=sale.id if sale else None,
+            amount=qty,
+            currency=tx.currency,
+            payment_method=payment_method,
+            note=description.strip() or "Оплата зарегистрирована через модуль Финансы",
+            created_by=user.username,
+        ))
+
+    db.add(AuditLog(
+        username=user.username,
+        action=f"finance_{transaction_type}",
+        details=f"{document_number}: {qty} {tx.currency}, счёт {account.code}",
+    ))
+    db.commit()
+    return RedirectResponse("/finance?success=Финансовая операция проведена", 303)
+
+@app.post("/finance/rates/create")
+def create_exchange_rate(
+    request: Request,
+    currency: str = Form(...),
+    rate_to_tmt: str = Form(...),
+    db: Session = Depends(get_db),
+):
+    try:
+        user = current_user(request, db)
+    except HTTPException:
+        return RedirectResponse("/", 303)
+
+    code = currency.strip().upper()
+    if code == "TMT":
+        return RedirectResponse("/finance?error=Для TMT курс не требуется", 303)
+
+    rate = ExchangeRate(
+        currency=code,
+        rate_to_tmt=safe_decimal(rate_to_tmt),
+        created_by=user.username,
+    )
+    db.add(rate)
+    db.add(AuditLog(
+        username=user.username,
+        action="exchange_rate_create",
+        details=f"1 {code} = {rate.rate_to_tmt} TMT",
+    ))
+    db.commit()
+    return RedirectResponse("/finance?success=Курс валют сохранён", 303)
+
+@app.get("/finance/transaction/{transaction_id}/print", response_class=HTMLResponse)
+def print_finance_transaction(
+    transaction_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    try:
+        user = current_user(request, db)
+    except HTTPException:
+        return RedirectResponse("/", 303)
+
+    tx = db.get(FinanceTransaction, transaction_id)
+    if not tx:
+        raise HTTPException(404, "Финансовый документ не найден")
+
+    return templates.TemplateResponse("finance_document.html", {
+        "request": request,
+        "user": user,
+        "tx": tx,
     })

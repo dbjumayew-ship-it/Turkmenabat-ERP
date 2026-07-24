@@ -274,3 +274,67 @@ class CustomerPayment(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
     customer: Mapped[Customer] = relationship(back_populates="payments")
     sale: Mapped[Sale | None] = relationship()
+
+
+class CashAccount(Base):
+    __tablename__ = "cash_accounts"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(40), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(160), index=True)
+    account_type: Mapped[str] = mapped_column(String(20), default="cash")
+    currency: Mapped[str] = mapped_column(String(10), default="TMT")
+    opening_balance: Mapped[Decimal] = mapped_column(Numeric(16, 2), default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    transactions: Mapped[list["FinanceTransaction"]] = relationship(
+        back_populates="account"
+    )
+
+class ExpenseCategory(Base):
+    __tablename__ = "expense_categories"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(40), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(160), index=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+class FinanceTransaction(Base):
+    __tablename__ = "finance_transactions"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    document_number: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    account_id: Mapped[int] = mapped_column(ForeignKey("cash_accounts.id"), index=True)
+    transaction_type: Mapped[str] = mapped_column(String(20), index=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(16, 2))
+    currency: Mapped[str] = mapped_column(String(10), default="TMT")
+    category_id: Mapped[int | None] = mapped_column(
+        ForeignKey("expense_categories.id"), nullable=True, index=True
+    )
+    customer_id: Mapped[int | None] = mapped_column(
+        ForeignKey("customers.id"), nullable=True, index=True
+    )
+    supplier_id: Mapped[int | None] = mapped_column(
+        ForeignKey("suppliers.id"), nullable=True, index=True
+    )
+    related_sale_id: Mapped[int | None] = mapped_column(
+        ForeignKey("sales.id"), nullable=True, index=True
+    )
+    payment_method: Mapped[str] = mapped_column(String(30), default="cash")
+    counterparty: Mapped[str] = mapped_column(String(180), default="")
+    description: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[str] = mapped_column(String(80))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+    account: Mapped[CashAccount] = relationship(back_populates="transactions")
+    category: Mapped[ExpenseCategory | None] = relationship()
+    customer: Mapped[Customer | None] = relationship()
+    supplier: Mapped[Supplier | None] = relationship()
+    related_sale: Mapped[Sale | None] = relationship()
+
+class ExchangeRate(Base):
+    __tablename__ = "exchange_rates"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    currency: Mapped[str] = mapped_column(String(10), index=True)
+    rate_to_tmt: Mapped[Decimal] = mapped_column(Numeric(16, 6))
+    effective_date: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    created_by: Mapped[str] = mapped_column(String(80))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
