@@ -1,12 +1,5 @@
-# Türkmenabat ERP Starter
+# Türkmenabat ERP v0.2 — Склад сырья
 
-FastAPI + PostgreSQL + responsive web dashboard + Android WebView source.
+Добавлен рабочий модуль склада сырья: справочник, приход, расход, остатки и журнал операций.
 
-## Render
-1. Upload all files to GitHub.
-2. Render: New → Blueprint.
-3. Select the repository.
-4. Set ADMIN_PASSWORD when requested.
-5. Deploy.
-
-Default local login: director / ChangeMe123!
+Загрузите содержимое архива в корень GitHub-репозитория с заменой файлов. После Commit Render развернёт новую версию автоматически.

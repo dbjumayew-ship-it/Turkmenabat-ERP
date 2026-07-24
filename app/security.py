@@ -1,14 +1,19 @@
-import os,base64,hashlib,hmac,secrets,jwt
+import base64,hashlib,hmac,os,secrets
 from datetime import datetime,timedelta,timezone
-SECRET=os.getenv("JWT_SECRET","dev-secret")
-def hash_password(p):
-    s=secrets.token_bytes(16); i=310000; d=hashlib.pbkdf2_hmac("sha256",p.encode(),s,i)
-    return f"pbkdf2_sha256${i}${base64.b64encode(s).decode()}${base64.b64encode(d).decode()}"
-def verify_password(p,stored):
+import jwt
+JWT_SECRET=os.getenv("JWT_SECRET","development-secret-change-me")
+def hash_password(password:str)->str:
+    salt=secrets.token_bytes(16); it=310000
+    d=hashlib.pbkdf2_hmac("sha256",password.encode(),salt,it)
+    return f"pbkdf2_sha256${it}${base64.b64encode(salt).decode()}${base64.b64encode(d).decode()}"
+def verify_password(password:str,stored:str)->bool:
     try:
-        _,i,s,d=stored.split("$",3); actual=hashlib.pbkdf2_hmac("sha256",p.encode(),base64.b64decode(s),int(i))
-        return hmac.compare_digest(actual,base64.b64decode(d))
-    except: return False
-def create_token(u,r):
-    now=datetime.now(timezone.utc); return jwt.encode({"sub":u,"role":r,"iat":now,"exp":now+timedelta(hours=12)},SECRET,algorithm="HS256")
-def decode_token(t): return jwt.decode(t,SECRET,algorithms=["HS256"])
+        a,it,s,d=stored.split("$",3)
+        if a!="pbkdf2_sha256": return False
+        x=hashlib.pbkdf2_hmac("sha256",password.encode(),base64.b64decode(s),int(it))
+        return hmac.compare_digest(x,base64.b64decode(d))
+    except Exception:return False
+def create_token(username,role):
+    n=datetime.now(timezone.utc)
+    return jwt.encode({"sub":username,"role":role,"iat":n,"exp":n+timedelta(hours=12)},JWT_SECRET,algorithm="HS256")
+def decode_token(token): return jwt.decode(token,JWT_SECRET,algorithms=["HS256"])
