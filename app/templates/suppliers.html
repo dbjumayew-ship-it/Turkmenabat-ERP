@@ -1,0 +1,29 @@
+<!doctype html><html lang="ru"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Поставщики — Türkmenabat ERP</title><link rel="stylesheet" href="/static/app.css"></head>
+<body>
+<header class="topbar"><strong>Türkmenabat ERP</strong><nav>
+<a href="/dashboard">Главная</a><a href="/warehouse/raw-materials">Склад</a>
+<a href="/suppliers">Поставщики</a><a href="/purchases">Закупки</a><a href="/logout">Выйти</a>
+</nav></header>
+<main class="container"><div class="page-head"><p class="eyebrow">СПРАВОЧНИК</p>
+<h1>Поставщики</h1><p>Контакты, валюты и реквизиты поставщиков.</p></div>
+{% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+{% if success %}<div class="alert success">{{ success }}</div>{% endif %}
+<section class="panel"><h2>Добавить поставщика</h2>
+<form action="/suppliers/create" method="post" class="form-grid">
+<label>Код<input name="code" placeholder="SUP-001" required></label>
+<label>Название<input name="name" placeholder="Поставщик сахара" required></label>
+<label>Контактное лицо<input name="contact_person"></label>
+<label>Телефон<input name="phone"></label>
+<label>Email<input name="email" type="email"></label>
+<label>ИНН / налоговый номер<input name="tax_number"></label>
+<label>Валюта<select name="currency"><option>TMT</option><option>USD</option><option>EUR</option><option>RUB</option></select></label>
+<label class="wide">Адрес<input name="address"></label>
+<button class="wide">Добавить поставщика</button></form></section>
+<section class="panel"><h2>Список поставщиков</h2><div class="table-wrap"><table>
+<thead><tr><th>Код</th><th>Название</th><th>Контакт</th><th>Телефон</th><th>Валюта</th><th>ИНН</th></tr></thead>
+<tbody>{% for s in suppliers %}<tr><td>{{ s.code }}</td><td><strong>{{ s.name }}</strong></td>
+<td>{{ s.contact_person or '—' }}</td><td>{{ s.phone or '—' }}</td><td>{{ s.currency }}</td>
+<td>{{ s.tax_number or '—' }}</td></tr>{% else %}<tr><td colspan="6">Поставщики пока не добавлены.</td></tr>{% endfor %}</tbody>
+</table></div></section></main></body></html>

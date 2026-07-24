@@ -1,0 +1,39 @@
+<!doctype html><html lang="ru"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Закупки — Türkmenabat ERP</title><link rel="stylesheet" href="/static/app.css"></head>
+<body>
+<header class="topbar"><strong>Türkmenabat ERP</strong><nav>
+<a href="/dashboard">Главная</a><a href="/warehouse/raw-materials">Склад</a>
+<a href="/suppliers">Поставщики</a><a href="/purchases">Закупки</a><a href="/logout">Выйти</a>
+</nav></header>
+<main class="container"><div class="page-head"><p class="eyebrow">ДОКУМЕНТЫ</p>
+<h1>Закупки сырья</h1><p>Проведённая закупка автоматически создаёт приход на склад.</p></div>
+{% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+{% if success %}<div class="alert success">{{ success }}</div>{% endif %}
+{% if not suppliers or not materials %}
+<div class="alert error">Сначала добавьте хотя бы одного поставщика и одно сырьё.</div>
+{% endif %}
+<section class="panel"><h2>Новая закупка</h2>
+<form action="/purchases/create" method="post" class="form-grid">
+<label>Номер закупки<input name="document_number" placeholder="PUR-0001" required></label>
+<label>Номер счёта / накладной<input name="invoice_number"></label>
+<label>Поставщик<select name="supplier_id" required>{% for s in suppliers %}
+<option value="{{ s.id }}">{{ s.code }} — {{ s.name }}</option>{% endfor %}</select></label>
+<label>Сырьё<select name="material_id" required>{% for m in materials %}
+<option value="{{ m.id }}">{{ m.code }} — {{ m.name }}</option>{% endfor %}</select></label>
+<label>Количество<input name="quantity" type="number" min="0.001" step="0.001" required></label>
+<label>Цена за единицу<input name="unit_price" type="number" min="0" step="0.01" required></label>
+<label>Валюта<select name="currency"><option>TMT</option><option>USD</option><option>EUR</option><option>RUB</option></select></label>
+<label class="wide">Примечание<input name="note"></label>
+<button class="wide" {% if not suppliers or not materials %}disabled{% endif %}>Провести закупку</button>
+</form></section>
+<section class="panel"><h2>Последние закупки</h2><div class="table-wrap"><table>
+<thead><tr><th>Дата</th><th>Документ</th><th>Поставщик</th><th>Сырьё</th><th>Количество</th><th>Сумма</th><th>Статус</th></tr></thead>
+<tbody>{% for p in purchases %}{% set item = p.items[0] if p.items else None %}
+<tr><td>{{ p.created_at.strftime('%d.%m.%Y %H:%M') }}</td><td>{{ p.document_number }}</td>
+<td>{{ p.supplier.name }}</td><td>{% if item %}{{ item.material.name }}{% else %}—{% endif %}</td>
+<td>{% if item %}{{ item.quantity }} {{ item.material.unit }}{% else %}—{% endif %}</td>
+<td>{% if item %}{{ item.quantity * item.unit_price }} {{ p.currency }}{% else %}—{% endif %}</td>
+<td><span class="badge ok">Проведена</span></td></tr>
+{% else %}<tr><td colspan="7">Закупок пока нет.</td></tr>{% endfor %}</tbody>
+</table></div></section></main></body></html>

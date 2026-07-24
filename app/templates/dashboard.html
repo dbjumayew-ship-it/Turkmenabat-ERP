@@ -1,1 +1,25 @@
-<!doctype html><html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/static/app.css"><title>ERP</title></head><body><header class="topbar"><strong>Türkmenabat ERP</strong><nav><a href="/dashboard">Главная</a><a href="/warehouse/raw-materials">Склад сырья</a><a href="/logout">Выйти</a></nav></header><main class="container"><section class="welcome"><div><p class="eyebrow">СЕРВЕР ПОДКЛЮЧЁН</p><h1>Здравствуйте, {{ user.full_name }}</h1><p>Роль: {{ user.role }}</p></div><div class="status">● Online</div></section><section class="metric-grid">{% for x in metrics %}<article class="card"><p>{{x.label}}</p><h2>{{x.value}} <small>{{x.unit}}</small></h2></article>{% endfor %}</section><h2>Модули предприятия</h2><section class="module-grid"><a href="/warehouse/raw-materials"><article><b>📦 Склад сырья</b><small>Рабочий модуль</small></article></a><article><b>🏭 Производство</b><small>Следующий этап</small></article><article><b>🧪 Рецептуры</b><small>Следующий этап</small></article></section></main></body></html>
+<!doctype html><html lang="ru"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Türkmenabat ERP</title><link rel="stylesheet" href="/static/app.css"></head>
+<body>
+<header class="topbar"><strong>Türkmenabat ERP</strong><nav>
+<a href="/dashboard">Главная</a><a href="/warehouse/raw-materials">Склад</a>
+<a href="/suppliers">Поставщики</a><a href="/purchases">Закупки</a><a href="/logout">Выйти</a>
+</nav></header>
+<main class="container">
+<section class="welcome"><div><p class="eyebrow">СЕРВЕР ПОДКЛЮЧЁН</p>
+<h1>Здравствуйте, {{ user.full_name }}</h1><p>Роль: {{ user.role }}</p></div>
+<div class="status">● Online</div></section>
+<section class="metric-grid">
+{% for item in metrics %}<article class="metric-card"><p>{{ item.label }}</p>
+<h2>{{ item.value }} <small>{{ item.unit }}</small></h2></article>{% endfor %}
+</section>
+<h2 class="section-title">Модули предприятия</h2>
+<section class="module-grid">
+<a class="module-link" href="/warehouse/raw-materials"><article><b>📦</b><span>Склад сырья</span><small>Рабочий модуль</small></article></a>
+<a class="module-link" href="/suppliers"><article><b>🚚</b><span>Поставщики</span><small>Рабочий модуль</small></article></a>
+<a class="module-link" href="/purchases"><article><b>🧾</b><span>Закупки</span><small>Рабочий модуль</small></article></a>
+<article><b>🧪</b><span>Рецептуры</span><small>Следующий этап</small></article>
+<article><b>🏭</b><span>Производство</span><small>Следующий этап</small></article>
+<article><b>💳</b><span>Продажи</span><small>Следующий этап</small></article>
+</section></main></body></html>
