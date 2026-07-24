@@ -1,0 +1,8 @@
+{
+  "app_name": "Türkmenabat ERP",
+  "server_url": "https://turkmenabat-erp.onrender.com/",
+  "health_url": "https://turkmenabat-erp.onrender.com/health",
+  "window_width": 1440,
+  "window_height": 900,
+  "allow_external_links": true
+}
