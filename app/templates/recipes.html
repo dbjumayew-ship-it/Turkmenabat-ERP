@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Рецептуры — Türkmenabat ERP</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="topbar">
+<strong>Türkmenabat ERP</strong>
+<nav>
+<a href="/dashboard">Главная</a>
+<a href="/warehouse/raw-materials">Склад</a>
+<a href="/suppliers">Поставщики</a>
+<a href="/purchases">Закупки</a>
+<a href="/recipes">Рецептуры</a>
+<a href="/logout">Выйти</a>
+</nav>
+</header>
+
+<main class="container">
+<div class="page-head">
+<p class="eyebrow">ТЕХНОЛОГИЯ</p>
+<h1>Рецептуры продукции</h1>
+<p>Количество каждого компонента указывается на базовую партию продукта.</p>
+</div>
+
+{% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+{% if success %}<div class="alert success">{{ success }}</div>{% endif %}
+
+<section class="panel">
+<h2>1. Создать продукт</h2>
+<form action="/recipes/products/create" method="post" class="form-grid">
+<label>Код продукта
+<input name="code" placeholder="ORG-033" required>
+</label>
+<label>Название
+<input name="name" placeholder="Orange 0.33" required>
+</label>
+<label>Объём одной бутылки, л
+<input name="volume_liters" type="number" min="0.001" step="0.001" value="0.33" required>
+</label>
+<label>Единица выпуска
+<input name="output_unit" value="бут." required>
+</label>
+<label>Базовая партия
+<input name="base_batch_quantity" type="number" min="0.001" step="0.001" value="1000" required>
+</label>
+<button class="wide">Создать продукт</button>
+</form>
+</section>
+
+<section class="panel">
+<h2>2. Добавить компонент в рецептуру</h2>
+
+{% if not products or not materials %}
+<div class="alert error">
+Сначала добавьте продукт и убедитесь, что на складе есть справочник сырья.
+</div>
+{% endif %}
+
+<form action="/recipes/items/create" method="post" class="form-grid">
+<label>Продукт
+<select name="product_id" required>
+{% for p in products %}
+<option value="{{ p.id }}">{{ p.code }} — {{ p.name }} / партия {{ p.base_batch_quantity }} {{ p.output_unit }}</option>
+{% endfor %}
+</select>
+</label>
+
+<label>Сырьё
+<select name="material_id" required>
+{% for m in materials %}
+<option value="{{ m.id }}">{{ m.code }} — {{ m.name }} ({{ m.unit }})</option>
+{% endfor %}
+</select>
+</label>
+
+<label>Количество на базовую партию
+<input name="quantity" type="number" min="0.0001" step="0.0001" required>
+</label>
+
+<label>Примечание
+<input name="note" placeholder="Например: растворить предварительно">
+</label>
+
+<button class="wide" {% if not products or not materials %}disabled{% endif %}>
+Сохранить компонент
+</button>
+</form>
+</section>
+
+<section class="panel">
+<h2>Готовые рецептуры</h2>
+
+{% for row in recipe_rows %}
+<div class="recipe-card">
+<div class="recipe-title">
+<div>
+<h3>{{ row.product.code }} — {{ row.product.name }}</h3>
+<p>
+Базовая партия: <strong>{{ row.product.base_batch_quantity }} {{ row.product.output_unit }}</strong>
+· Объём единицы: <strong>{{ row.product.volume_liters }} л</strong>
+</p>
+</div>
+<span class="badge ok">{{ row.items_count }} компонентов</span>
+</div>
+
+<div class="table-wrap">
+<table>
+<thead>
+<tr>
+<th>Сырьё</th>
+<th>Количество</th>
+<th>Ед.</th>
+<th>Примечание</th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+{% for item in row.items %}
+<tr>
+<td><strong>{{ item.material.name }}</strong><br><small>{{ item.material.code }}</small></td>
+<td>{{ item.quantity }}</td>
+<td>{{ item.material.unit }}</td>
+<td>{{ item.note or '—' }}</td>
+<td>
+<form action="/recipes/items/delete" method="post">
+<input type="hidden" name="item_id" value="{{ item.id }}">
+<button class="danger-button" type="submit">Удалить</button>
+</form>
+</td>
+</tr>
+{% else %}
+<tr><td colspan="5">Компоненты ещё не добавлены.</td></tr>
+{% endfor %}
+</tbody>
+</table>
+</div>
+</div>
+{% else %}
+<p>Продукты пока не созданы.</p>
+{% endfor %}
+</section>
+</main>
+</body>
+</html>

@@ -94,3 +94,28 @@ class RawMaterialMovement(Base):
     created_by: Mapped[str] = mapped_column(String(80))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
     material: Mapped[RawMaterial] = relationship(back_populates="movements")
+
+
+class Product(Base):
+    __tablename__ = "products"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(40), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(180), index=True)
+    volume_liters: Mapped[Decimal] = mapped_column(Numeric(10, 3), default=0.33)
+    output_unit: Mapped[str] = mapped_column(String(20), default="бут.")
+    base_batch_quantity: Mapped[Decimal] = mapped_column(Numeric(14, 3), default=1000)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    recipe_items: Mapped[list["RecipeItem"]] = relationship(
+        back_populates="product", cascade="all, delete-orphan"
+    )
+
+class RecipeItem(Base):
+    __tablename__ = "recipe_items"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), index=True)
+    material_id: Mapped[int] = mapped_column(ForeignKey("raw_materials.id"), index=True)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(14, 4))
+    note: Mapped[str] = mapped_column(String(300), default="")
+    product: Mapped[Product] = relationship(back_populates="recipe_items")
+    material: Mapped[RawMaterial] = relationship()

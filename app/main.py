@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from .database import Base, SessionLocal, engine, get_db
 from .models import (
     AuditLog, DashboardMetric, Purchase, PurchaseItem, RawMaterial,
-    RawMaterialMovement, Supplier, User
+    RawMaterialMovement, RecipeItem, Product, Supplier, User
 )
 from .security import create_token, decode_token, hash_password, verify_password
 
@@ -273,3 +273,147 @@ def logout():
     response = RedirectResponse("/", 303)
     response.delete_cookie("erp_token")
     return response
+
+
+@app.get("/recipes", response_class=HTMLResponse)
+def recipes_page(request: Request, db: Session = Depends(get_db)):
+    try:
+        user = current_user(request, db)
+    except HTTPException:
+        return RedirectResponse("/", 303)
+
+    products = db.query(Product).filter(Product.is_active == True).order_by(Product.name).all()
+    materials = db.query(RawMaterial).filter(RawMaterial.is_active == True).order_by(RawMaterial.name).all()
+
+    recipe_rows = []
+    for product in products:
+        total_items = len(product.recipe_items)
+        recipe_rows.append({
+            "product": product,
+            "items_count": total_items,
+            "items": sorted(product.recipe_items, key=lambda x: x.material.name.lower())
+        })
+
+    return templates.TemplateResponse("recipes.html", {
+        "request": request,
+        "user": user,
+        "recipe_rows": recipe_rows,
+        "products": products,
+        "materials": materials,
+        "error": request.query_params.get("error"),
+        "success": request.query_params.get("success"),
+    })
+
+@app.post("/recipes/products/create")
+def create_product(
+    request: Request,
+    code: str = Form(...),
+    name: str = Form(...),
+    volume_liters: str = Form("0.33"),
+    output_unit: str = Form("бут."),
+    base_batch_quantity: str = Form("1000"),
+    db: Session = Depends(get_db),
+):
+    try:
+        user = current_user(request, db)
+    except HTTPException:
+        return RedirectResponse("/", 303)
+
+    code = code.strip().upper()
+    name = name.strip()
+    if not code or not name:
+        return RedirectResponse("/recipes?error=Заполните код и название продукта", 303)
+
+    if db.query(Product).filter(Product.code == code).first():
+        return RedirectResponse("/recipes?error=Такой код продукта уже существует", 303)
+
+    volume = safe_decimal(volume_liters)
+    batch = safe_decimal(base_batch_quantity)
+
+    product = Product(
+        code=code,
+        name=name,
+        volume_liters=volume,
+        output_unit=output_unit.strip() or "бут.",
+        base_batch_quantity=batch,
+    )
+    db.add(product)
+    db.add(AuditLog(
+        username=user.username,
+        action="product_create",
+        details=f"{code} — {name}; базовая партия {batch}"
+    ))
+    db.commit()
+    return RedirectResponse("/recipes?success=Продукт создан", 303)
+
+@app.post("/recipes/items/create")
+def create_recipe_item(
+    request: Request,
+    product_id: int = Form(...),
+    material_id: int = Form(...),
+    quantity: str = Form(...),
+    note: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    try:
+        user = current_user(request, db)
+    except HTTPException:
+        return RedirectResponse("/", 303)
+
+    product = db.get(Product, product_id)
+    material = db.get(RawMaterial, material_id)
+    if not product or not material:
+        return RedirectResponse("/recipes?error=Продукт или сырьё не найдено", 303)
+
+    qty = safe_decimal(quantity)
+
+    existing = db.query(RecipeItem).filter(
+        RecipeItem.product_id == product.id,
+        RecipeItem.material_id == material.id,
+    ).first()
+
+    if existing:
+        existing.quantity = qty
+        existing.note = note.strip()
+        action = "recipe_item_update"
+    else:
+        db.add(RecipeItem(
+            product_id=product.id,
+            material_id=material.id,
+            quantity=qty,
+            note=note.strip(),
+        ))
+        action = "recipe_item_create"
+
+    db.add(AuditLog(
+        username=user.username,
+        action=action,
+        details=f"{product.code}: {material.code} = {qty} {material.unit}"
+    ))
+    db.commit()
+    return RedirectResponse("/recipes?success=Рецептура сохранена", 303)
+
+@app.post("/recipes/items/delete")
+def delete_recipe_item(
+    request: Request,
+    item_id: int = Form(...),
+    db: Session = Depends(get_db),
+):
+    try:
+        user = current_user(request, db)
+    except HTTPException:
+        return RedirectResponse("/", 303)
+
+    item = db.get(RecipeItem, item_id)
+    if not item:
+        return RedirectResponse("/recipes?error=Строка рецептуры не найдена", 303)
+
+    details = f"{item.product.code}: удалено {item.material.code}"
+    db.delete(item)
+    db.add(AuditLog(
+        username=user.username,
+        action="recipe_item_delete",
+        details=details
+    ))
+    db.commit()
+    return RedirectResponse("/recipes?success=Компонент удалён", 303)
