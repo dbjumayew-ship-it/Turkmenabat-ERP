@@ -209,3 +209,68 @@ class QualityControlRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
 
     production_batch: Mapped[ProductionBatch] = relationship()
+
+
+class Customer(Base):
+    __tablename__ = "customers"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(40), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(180), index=True)
+    customer_type: Mapped[str] = mapped_column(String(30), default="shop")
+    contact_person: Mapped[str] = mapped_column(String(140), default="")
+    phone: Mapped[str] = mapped_column(String(60), default="")
+    email: Mapped[str] = mapped_column(String(140), default="")
+    address: Mapped[str] = mapped_column(String(300), default="")
+    tax_number: Mapped[str] = mapped_column(String(80), default="")
+    credit_limit: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
+    currency: Mapped[str] = mapped_column(String(10), default="TMT")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    sales: Mapped[list["Sale"]] = relationship(back_populates="customer")
+    payments: Mapped[list["CustomerPayment"]] = relationship(back_populates="customer")
+
+class Sale(Base):
+    __tablename__ = "sales"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    document_number: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), index=True)
+    currency: Mapped[str] = mapped_column(String(10), default="TMT")
+    payment_type: Mapped[str] = mapped_column(String(20), default="credit")
+    status: Mapped[str] = mapped_column(String(20), default="posted")
+    delivery_address: Mapped[str] = mapped_column(String(300), default="")
+    vehicle_number: Mapped[str] = mapped_column(String(80), default="")
+    driver_name: Mapped[str] = mapped_column(String(160), default="")
+    note: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[str] = mapped_column(String(80))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    customer: Mapped[Customer] = relationship(back_populates="sales")
+    items: Mapped[list["SaleItem"]] = relationship(
+        back_populates="sale", cascade="all, delete-orphan"
+    )
+
+class SaleItem(Base):
+    __tablename__ = "sale_items"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    sale_id: Mapped[int] = mapped_column(ForeignKey("sales.id"), index=True)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), index=True)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(14, 3))
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(14, 2))
+    sale: Mapped[Sale] = relationship(back_populates="items")
+    product: Mapped[Product] = relationship()
+
+class CustomerPayment(Base):
+    __tablename__ = "customer_payments"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    document_number: Mapped[str] = mapped_column(String(80), unique=True, index=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), index=True)
+    sale_id: Mapped[int | None] = mapped_column(
+        ForeignKey("sales.id"), nullable=True, index=True
+    )
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2))
+    currency: Mapped[str] = mapped_column(String(10), default="TMT")
+    payment_method: Mapped[str] = mapped_column(String(30), default="cash")
+    note: Mapped[str] = mapped_column(Text, default="")
+    created_by: Mapped[str] = mapped_column(String(80))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    customer: Mapped[Customer] = relationship(back_populates="payments")
+    sale: Mapped[Sale | None] = relationship()

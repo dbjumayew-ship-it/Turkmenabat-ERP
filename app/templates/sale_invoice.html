@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><title>Накладная {{ sale.document_number }}</title>
+<style>
+body{font-family:Arial,sans-serif;margin:32px;color:#111}.head{display:flex;justify-content:space-between;gap:24px}
+h1{margin:0 0 8px}.muted{color:#555}table{width:100%;border-collapse:collapse;margin-top:28px}
+th,td{border:1px solid #333;padding:9px;text-align:left}.totals{margin:24px 0 0 auto;width:340px}
+.signatures{display:grid;grid-template-columns:1fr 1fr;gap:70px;margin-top:70px}.line{border-top:1px solid #111;padding-top:6px}
+.actions{margin-bottom:20px}@media print{.actions{display:none}body{margin:10mm}}
+</style>
+</head>
+<body>
+<div class="actions"><button onclick="window.print()">Печать / PDF</button></div>
+<div class="head"><div><h1>ТОВАРНАЯ НАКЛАДНАЯ</h1><strong>№ {{ sale.document_number }}</strong>
+<p class="muted">{{ sale.created_at.strftime('%d.%m.%Y %H:%M') }}</p></div>
+<div><strong>Türkmenabat ERP</strong><p>Отпустил: {{ user.full_name }}</p></div></div>
+<hr>
+<p><strong>Покупатель:</strong> {{ sale.customer.name }} ({{ sale.customer.code }})</p>
+<p><strong>Адрес:</strong> {{ sale.delivery_address or sale.customer.address or '—' }}</p>
+<p><strong>Водитель / машина:</strong> {{ sale.driver_name or '—' }} / {{ sale.vehicle_number or '—' }}</p>
+<table><thead><tr><th>№</th><th>Наименование</th><th>Ед.</th><th>Количество</th><th>Цена</th><th>Сумма</th></tr></thead><tbody>
+{% for item in sale.items %}<tr><td>{{ loop.index }}</td><td>{{ item.product.code }} — {{ item.product.name }}</td>
+<td>{{ item.product.output_unit }}</td><td>{{ item.quantity }}</td><td>{{ item.unit_price }}</td>
+<td>{{ item.quantity * item.unit_price }}</td></tr>{% endfor %}
+</tbody></table>
+<table class="totals"><tr><th>Итого</th><td>{{ total }} {{ sale.currency }}</td></tr>
+<tr><th>Оплачено</th><td>{{ paid }} {{ sale.currency }}</td></tr>
+<tr><th>Задолженность</th><td>{{ debt }} {{ sale.currency }}</td></tr></table>
+<p><strong>Примечание:</strong> {{ sale.note or '—' }}</p>
+<div class="signatures"><div class="line">Отпустил</div><div class="line">Получил</div></div>
+</body></html>

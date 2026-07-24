@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Продажи — Türkmenabat ERP</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="topbar"><strong>Türkmenabat ERP</strong><nav>
+<a href="/dashboard">Главная</a><a href="/production">Производство</a>
+<a href="/finished-goods">Готовая продукция</a><a href="/customers">Клиенты</a>
+<a href="/sales">Продажи</a><a href="/logout">Выйти</a>
+</nav></header>
+<main class="container">
+<div class="page-head"><p class="eyebrow">РЕАЛИЗАЦИЯ</p><h1>Продажи и отгрузки</h1>
+<p>Отгрузка автоматически уменьшает остаток готовой продукции и формирует задолженность.</p></div>
+{% if error %}<div class="alert error">{{ error }}</div>{% endif %}
+{% if success %}<div class="alert success">{{ success }}</div>{% endif %}
+
+<section class="panel"><h2>Новая отгрузка</h2>
+<form action="/sales/create" method="post" class="form-grid">
+<label>Номер документа<input name="document_number" placeholder="SAL-0001" required></label>
+<label>Клиент<select name="customer_id" required>
+{% for c in customers %}<option value="{{ c.id }}">{{ c.code }} — {{ c.name }}</option>{% endfor %}
+</select></label>
+<label>Продукт<select name="product_id" required>
+{% for p in products %}<option value="{{ p.id }}">{{ p.code }} — {{ p.name }}</option>{% endfor %}
+</select></label>
+<label>Количество<input name="quantity" type="number" min="0.001" step="0.001" required></label>
+<label>Цена за единицу<input name="unit_price" type="number" min="0" step="0.01" required></label>
+<label>Тип оплаты<select name="payment_type">
+<option value="credit">В долг</option><option value="cash">Наличными сразу</option>
+</select></label>
+<label>Валюта<select name="currency"><option>TMT</option><option>USD</option><option>EUR</option></select></label>
+<label>Номер машины<input name="vehicle_number"></label>
+<label>Водитель<input name="driver_name"></label>
+<label class="wide">Адрес доставки<input name="delivery_address"></label>
+<label class="wide">Комментарий<input name="note"></label>
+<button class="wide" {% if not customers or not products %}disabled{% endif %}>Провести отгрузку</button>
+</form></section>
+
+<section class="panel"><h2>Доступные остатки</h2>
+<div class="table-wrap"><table><thead><tr><th>Код</th><th>Продукт</th><th>Остаток</th></tr></thead><tbody>
+{% for row in product_rows %}<tr><td>{{ row.product.code }}</td><td>{{ row.product.name }}</td>
+<td>{{ row.stock }} {{ row.product.output_unit }}</td></tr>
+{% else %}<tr><td colspan="3">Продуктов нет.</td></tr>{% endfor %}
+</tbody></table></div></section>
+
+<section class="panel"><h2>Регистрация оплаты</h2>
+<form action="/sales/payments/create" method="post" class="form-grid">
+<label>Номер платежа<input name="document_number" placeholder="PAY-0001" required></label>
+<label>Клиент<select name="customer_id" required>
+{% for c in customers %}<option value="{{ c.id }}">{{ c.code }} — {{ c.name }}</option>{% endfor %}
+</select></label>
+<label>Связать с отгрузкой<select name="sale_id"><option value="">— Общая оплата клиента —</option>
+{% for row in sale_rows %}<option value="{{ row.sale.id }}">{{ row.sale.document_number }} — {{ row.sale.customer.name }}</option>{% endfor %}
+</select></label>
+<label>Сумма<input name="amount" type="number" min="0.01" step="0.01" required></label>
+<label>Способ<select name="payment_method">
+<option value="cash">Наличные</option><option value="bank">Банк</option><option value="card">Карта</option><option value="other">Другое</option>
+</select></label>
+<label>Валюта<select name="currency"><option>TMT</option><option>USD</option><option>EUR</option></select></label>
+<label class="wide">Комментарий<input name="note"></label>
+<button class="wide">Зарегистрировать оплату</button>
+</form></section>
+
+<section class="panel"><h2>История отгрузок</h2>
+<div class="table-wrap"><table><thead><tr>
+<th>Дата</th><th>Документ</th><th>Клиент</th><th>Товар</th><th>Сумма</th><th>Оплачено</th><th>Долг</th><th>Накладная</th>
+</tr></thead><tbody>
+{% for row in sale_rows %}<tr>
+<td>{{ row.sale.created_at.strftime('%d.%m.%Y %H:%M') }}</td>
+<td><strong>{{ row.sale.document_number }}</strong></td><td>{{ row.sale.customer.name }}</td>
+<td>{% for item in row.sale.items %}{{ item.product.name }} — {{ item.quantity }} {{ item.product.output_unit }}{% endfor %}</td>
+<td>{{ row.total }} {{ row.sale.currency }}</td><td>{{ row.paid }} {{ row.sale.currency }}</td>
+<td>{% if row.debt > 0 %}<span class="badge danger">{{ row.debt }}</span>{% else %}<span class="badge ok">{{ row.debt }}</span>{% endif %}</td>
+<td><a href="/sales/{{ row.sale.id }}/invoice" target="_blank">Открыть</a></td>
+</tr>{% else %}<tr><td colspan="8">Отгрузок пока нет.</td></tr>{% endfor %}
+</tbody></table></div></section>
+
+<section class="panel"><h2>Последние оплаты</h2>
+<div class="table-wrap"><table><thead><tr><th>Дата</th><th>Документ</th><th>Клиент</th><th>Сумма</th><th>Способ</th></tr></thead><tbody>
+{% for p in payments %}<tr><td>{{ p.created_at.strftime('%d.%m.%Y %H:%M') }}</td>
+<td>{{ p.document_number }}</td><td>{{ p.customer.name }}</td><td>{{ p.amount }} {{ p.currency }}</td><td>{{ p.payment_method }}</td></tr>
+{% else %}<tr><td colspan="5">Оплат пока нет.</td></tr>{% endfor %}
+</tbody></table></div></section>
+</main></body></html>

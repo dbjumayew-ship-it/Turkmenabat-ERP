@@ -16,7 +16,8 @@ from .models import (
     AuditLog, DashboardMetric, Purchase, PurchaseItem, RawMaterial,
     RawMaterialMovement, RecipeItem, Product, Supplier, User,
     ProductionBatch, ProductionConsumption, FinishedGoodsMovement,
-    ProductionEvent, QualityControlRecord
+    ProductionEvent, QualityControlRecord,
+    Customer, Sale, SaleItem, CustomerPayment
 )
 from .security import create_token, decode_token, hash_password, verify_password
 
@@ -51,7 +52,7 @@ async def lifespan(app: FastAPI):
     seed()
     yield
 
-app = FastAPI(title="Türkmenabat ERP API", version="0.3.0", lifespan=lifespan)
+app = FastAPI(title="Türkmenabat ERP API", version="0.7.0", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
@@ -91,7 +92,7 @@ def safe_decimal(value: str, allow_zero: bool = False) -> Decimal:
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "version": "0.3.0"}
+    return {"status": "ok", "version": "0.7.0"}
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
@@ -911,3 +912,336 @@ def create_quality_control(
     return RedirectResponse(
         "/production/control?success=Контроль качества сохранён", 303
     )
+
+
+def sale_total(sale: Sale) -> Decimal:
+    return sum(
+        (Decimal(item.quantity) * Decimal(item.unit_price) for item in sale.items),
+        Decimal("0"),
+    )
+
+def customer_sales_total(db: Session, customer_id: int) -> Decimal:
+    rows = (
+        db.query(SaleItem)
+        .join(Sale, SaleItem.sale_id == Sale.id)
+        .filter(Sale.customer_id == customer_id, Sale.status == "posted")
+        .all()
+    )
+    return sum(
+        (Decimal(row.quantity) * Decimal(row.unit_price) for row in rows),
+        Decimal("0"),
+    )
+
+def customer_payments_total(db: Session, customer_id: int) -> Decimal:
+    total = db.query(
+        func.coalesce(func.sum(CustomerPayment.amount), 0)
+    ).filter(CustomerPayment.customer_id == customer_id).scalar()
+    return Decimal(total or 0)
+
+@app.get("/customers", response_class=HTMLResponse)
+def customers_page(request: Request, db: Session = Depends(get_db)):
+    try:
+        user = current_user(request, db)
+    except HTTPException:
+        return RedirectResponse("/", 303)
+
+    customers = db.query(Customer).order_by(Customer.name).all()
+    rows = []
+    for customer in customers:
+        sales_total = customer_sales_total(db, customer.id)
+        paid_total = customer_payments_total(db, customer.id)
+        rows.append({
+            "customer": customer,
+            "sales_total": sales_total,
+            "paid_total": paid_total,
+            "debt": sales_total - paid_total,
+        })
+
+    return templates.TemplateResponse("customers.html", {
+        "request": request,
+        "user": user,
+        "rows": rows,
+        "error": request.query_params.get("error"),
+        "success": request.query_params.get("success"),
+    })
+
+@app.post("/customers/create")
+def create_customer(
+    request: Request,
+    code: str = Form(...),
+    name: str = Form(...),
+    customer_type: str = Form("shop"),
+    contact_person: str = Form(""),
+    phone: str = Form(""),
+    email: str = Form(""),
+    address: str = Form(""),
+    tax_number: str = Form(""),
+    credit_limit: str = Form("0"),
+    currency: str = Form("TMT"),
+    db: Session = Depends(get_db),
+):
+    try:
+        user = current_user(request, db)
+    except HTTPException:
+        return RedirectResponse("/", 303)
+
+    code = code.strip().upper()
+    if db.query(Customer).filter(Customer.code == code).first():
+        return RedirectResponse("/customers?error=Код клиента уже существует", 303)
+
+    customer = Customer(
+        code=code,
+        name=name.strip(),
+        customer_type=customer_type,
+        contact_person=contact_person.strip(),
+        phone=phone.strip(),
+        email=email.strip(),
+        address=address.strip(),
+        tax_number=tax_number.strip(),
+        credit_limit=safe_decimal(credit_limit, allow_zero=True),
+        currency=currency.strip().upper(),
+    )
+    db.add(customer)
+    db.add(AuditLog(
+        username=user.username,
+        action="customer_create",
+        details=f"{code}: {name.strip()}",
+    ))
+    db.commit()
+    return RedirectResponse("/customers?success=Клиент добавлен", 303)
+
+@app.get("/sales", response_class=HTMLResponse)
+def sales_page(request: Request, db: Session = Depends(get_db)):
+    try:
+        user = current_user(request, db)
+    except HTTPException:
+        return RedirectResponse("/", 303)
+
+    customers = (
+        db.query(Customer)
+        .filter(Customer.is_active == True)
+        .order_by(Customer.name)
+        .all()
+    )
+    products = (
+        db.query(Product)
+        .filter(Product.is_active == True)
+        .order_by(Product.name)
+        .all()
+    )
+    sales = db.query(Sale).order_by(Sale.created_at.desc()).limit(100).all()
+    payments = (
+        db.query(CustomerPayment)
+        .order_by(CustomerPayment.created_at.desc())
+        .limit(100)
+        .all()
+    )
+    sale_rows = []
+    for sale in sales:
+        total = sale_total(sale)
+        paid = db.query(
+            func.coalesce(func.sum(CustomerPayment.amount), 0)
+        ).filter(CustomerPayment.sale_id == sale.id).scalar()
+        sale_rows.append({
+            "sale": sale,
+            "total": total,
+            "paid": Decimal(paid or 0),
+            "debt": total - Decimal(paid or 0),
+        })
+
+    product_rows = [
+        {"product": p, "stock": finished_stock_for_product(db, p.id)}
+        for p in products
+    ]
+
+    return templates.TemplateResponse("sales.html", {
+        "request": request,
+        "user": user,
+        "customers": customers,
+        "products": products,
+        "product_rows": product_rows,
+        "sale_rows": sale_rows,
+        "payments": payments,
+        "error": request.query_params.get("error"),
+        "success": request.query_params.get("success"),
+    })
+
+@app.post("/sales/create")
+def create_sale(
+    request: Request,
+    document_number: str = Form(...),
+    customer_id: int = Form(...),
+    product_id: int = Form(...),
+    quantity: str = Form(...),
+    unit_price: str = Form(...),
+    currency: str = Form("TMT"),
+    payment_type: str = Form("credit"),
+    delivery_address: str = Form(""),
+    vehicle_number: str = Form(""),
+    driver_name: str = Form(""),
+    note: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    try:
+        user = current_user(request, db)
+    except HTTPException:
+        return RedirectResponse("/", 303)
+
+    document_number = document_number.strip().upper()
+    if db.query(Sale).filter(Sale.document_number == document_number).first():
+        return RedirectResponse("/sales?error=Такой номер отгрузки уже существует", 303)
+
+    customer = db.get(Customer, customer_id)
+    product = db.get(Product, product_id)
+    if not customer or not product:
+        return RedirectResponse("/sales?error=Клиент или продукт не найден", 303)
+
+    qty = safe_decimal(quantity)
+    price = safe_decimal(unit_price, allow_zero=True)
+    available = finished_stock_for_product(db, product.id)
+    if qty > available:
+        return RedirectResponse(
+            f"/sales?error=Недостаточно товара. Доступно: {available} {product.output_unit}",
+            303,
+        )
+
+    order_total = (qty * price).quantize(Decimal("0.01"))
+    current_debt = customer_sales_total(db, customer.id) - customer_payments_total(db, customer.id)
+    if customer.credit_limit and payment_type == "credit":
+        if current_debt + order_total > Decimal(customer.credit_limit):
+            return RedirectResponse(
+                "/sales?error=Превышен кредитный лимит клиента", 303
+            )
+
+    sale = Sale(
+        document_number=document_number,
+        customer_id=customer.id,
+        currency=currency.strip().upper(),
+        payment_type=payment_type,
+        status="posted",
+        delivery_address=delivery_address.strip() or customer.address,
+        vehicle_number=vehicle_number.strip(),
+        driver_name=driver_name.strip(),
+        note=note.strip(),
+        created_by=user.username,
+    )
+    db.add(sale)
+    db.flush()
+    db.add(SaleItem(
+        sale_id=sale.id,
+        product_id=product.id,
+        quantity=qty,
+        unit_price=price,
+    ))
+    db.add(FinishedGoodsMovement(
+        product_id=product.id,
+        movement_type="issue",
+        quantity=qty,
+        document_number=document_number,
+        destination_or_customer=customer.name,
+        note=f"Продажа / отгрузка. {note}".strip(),
+        created_by=user.username,
+    ))
+
+    if payment_type == "cash" and order_total > 0:
+        payment_doc = f"PAY-{document_number}"
+        if not db.query(CustomerPayment).filter(
+            CustomerPayment.document_number == payment_doc
+        ).first():
+            db.add(CustomerPayment(
+                document_number=payment_doc,
+                customer_id=customer.id,
+                sale_id=sale.id,
+                amount=order_total,
+                currency=sale.currency,
+                payment_method="cash",
+                note="Автоматическая оплата наличными",
+                created_by=user.username,
+            ))
+
+    db.add(AuditLog(
+        username=user.username,
+        action="sale_post",
+        details=(
+            f"{document_number}: {customer.name}, {product.name}, "
+            f"{qty} x {price} = {order_total} {sale.currency}"
+        ),
+    ))
+    db.commit()
+    return RedirectResponse(
+        "/sales?success=Отгрузка проведена, склад готовой продукции уменьшен", 303
+    )
+
+@app.post("/sales/payments/create")
+def create_customer_payment(
+    request: Request,
+    document_number: str = Form(...),
+    customer_id: int = Form(...),
+    amount: str = Form(...),
+    currency: str = Form("TMT"),
+    payment_method: str = Form("cash"),
+    sale_id: int | None = Form(None),
+    note: str = Form(""),
+    db: Session = Depends(get_db),
+):
+    try:
+        user = current_user(request, db)
+    except HTTPException:
+        return RedirectResponse("/", 303)
+
+    document_number = document_number.strip().upper()
+    if db.query(CustomerPayment).filter(
+        CustomerPayment.document_number == document_number
+    ).first():
+        return RedirectResponse("/sales?error=Такой платёжный документ уже существует", 303)
+
+    customer = db.get(Customer, customer_id)
+    sale = db.get(Sale, sale_id) if sale_id else None
+    if not customer:
+        return RedirectResponse("/sales?error=Клиент не найден", 303)
+    if sale and sale.customer_id != customer.id:
+        return RedirectResponse("/sales?error=Отгрузка принадлежит другому клиенту", 303)
+
+    payment = CustomerPayment(
+        document_number=document_number,
+        customer_id=customer.id,
+        sale_id=sale.id if sale else None,
+        amount=safe_decimal(amount),
+        currency=currency.strip().upper(),
+        payment_method=payment_method,
+        note=note.strip(),
+        created_by=user.username,
+    )
+    db.add(payment)
+    db.add(AuditLog(
+        username=user.username,
+        action="customer_payment",
+        details=f"{document_number}: {customer.name}, {payment.amount} {payment.currency}",
+    ))
+    db.commit()
+    return RedirectResponse("/sales?success=Оплата зарегистрирована", 303)
+
+@app.get("/sales/{sale_id}/invoice", response_class=HTMLResponse)
+def sale_invoice(sale_id: int, request: Request, db: Session = Depends(get_db)):
+    try:
+        user = current_user(request, db)
+    except HTTPException:
+        return RedirectResponse("/", 303)
+
+    sale = db.get(Sale, sale_id)
+    if not sale:
+        raise HTTPException(404, "Отгрузка не найдена")
+
+    total = sale_total(sale)
+    paid = db.query(
+        func.coalesce(func.sum(CustomerPayment.amount), 0)
+    ).filter(CustomerPayment.sale_id == sale.id).scalar()
+
+    return templates.TemplateResponse("sale_invoice.html", {
+        "request": request,
+        "user": user,
+        "sale": sale,
+        "total": total,
+        "paid": Decimal(paid or 0),
+        "debt": total - Decimal(paid or 0),
+    })
