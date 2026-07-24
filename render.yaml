@@ -1,0 +1,30 @@
+databases:
+  - name: turkmenabat-erp-db
+    plan: free
+    databaseName: turkmenabat_erp
+    user: turkmenabat_erp_user
+services:
+  - type: web
+    name: turkmenabat-erp
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.11
+      - key: DATABASE_URL
+        fromDatabase:
+          name: turkmenabat-erp-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: ADMIN_USERNAME
+        value: director
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: ADMIN_FULL_NAME
+        value: Director
+      - key: COOKIE_SECURE
+        value: "true"
